@@ -1,0 +1,2907 @@
+[03] START 15:42:04
+[0m
+> build · Qwen3.8-27B-IQ3_XXS
+[0m
+[0m→ [0mRead .scratch/deepdelve/issues/03-monster-deserialize-stub.md
+[0m→ [0mRead AGENTS.md
+[0m✱ [0mGrep "struct Monster\b"[90m in . · 1 match[0m
+[0m✱ [0mGrep "IgnoredAny"[90m in . · 4 matches[0m
+[0m→ [0mRead src/entities/monster.rs
+[0m
+[0m$ [0mgit -C /home/anonymous/projects/rougelike status && git -C /home/anonymous/projects/rougelike log --oneline -5
+On branch master
+Your branch is up to date with 'origin/master'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.opencode/
+	.scratch/implement-all.log
+	scripts/
+
+nothing added to commit but untracked files present (use "git add" to track)
+367ec2c fix 3
+b146185 update readme
+e6c2a94 Address code review: dedup save test setup, fix harness comment (issue 02)
+142523a fix + update
+850384f Address code review: tidy hiscore tests, add done label
+[0m
+[0m$ [0mgit -C /home/anonymous/projects/rougelike show --stat 367ec2c && git -C /home/anonymous/projects/rougelike log -1 367ec2c --format=%B
+commit 367ec2cf201b32834b27607550ebb20ed8d97afc
+Author: Michael Knopke <knopkem@gmail.com>
+Date:   Thu Aug 20 15:07:52 2026 +0200
+
+    fix 3
+
+ .../issues/03-monster-deserialize-stub.md          |  14 ++-
+ src/core/game.rs                                   |  14 ++-
+ src/data/monsters.rs                               |   2 +-
+ src/entities/monster.rs                            | 115 ++++++++++++++++-----
+ src/quest.rs                                       |   4 +-
+ src/save.rs                                        |  47 +++++++++
+ 6 files changed, 161 insertions(+), 35 deletions(-)
+fix 3
+[0m
+[0m$ [0mgit -C /home/anonymous/projects/rougelike show 367ec2c | head -200
+commit 367ec2cf201b32834b27607550ebb20ed8d97afc
+Author: Michael Knopke <knopkem@gmail.com>
+Date:   Thu Aug 20 15:07:52 2026 +0200
+
+    fix 3
+
+diff --git a/.scratch/deepdelve/issues/03-monster-deserialize-stub.md b/.scratch/deepdelve/issues/03-monster-deserialize-stub.md
+index 37e9228..259d987 100644
+--- a/.scratch/deepdelve/issues/03-monster-deserialize-stub.md
++++ b/.scratch/deepdelve/issues/03-monster-deserialize-stub.md
+@@ -27,9 +27,17 @@ and any flags survive a save/load round-trip.
+ - Keep the existing `Serialize` impl consistent with the derived `Deserialize`
+ 
+ **Acceptance criteria:**
+-- [ ] A save→load round-trip preserves the full monster list (def, name, pos, hp)
+-- [ ] No placeholder/`IgnoredAny` code remains in the monster deserialization path
+-- [ ] `cargo check` passes with no new warnings (the `ignored` variable warning disappears)
++- [x] A save→load round-trip preserves the full monster list (def, name, pos, hp)
++- [x] No placeholder/`IgnoredAny` code remains in the monster deserialization path
++- [x] `cargo check` passes with no new warnings (the `ignored` variable warning disappears)
++
++Implementation note (2026-08-20): the derive could not be added directly —
++`MonsterDef.name` is `&'static str`, which does not deserialize from JSON
++(lifetime bound `'de: 'static`). `Monster.def` therefore holds a new
++`MonsterDefData` (owned `String` name) that `Serialize` writes in exactly the
++same shape as the derive would; `MonsterDef: Into<MonsterDefData>` covers the
++spawn path. `MonsterDef` also gained a `PartialEq` derive (used by the
++round-trip test).
+ 
+ **Out of scope:**
+ - Save file versioning/migration (no existing valid saves matter — the format was corrupting them anyway)
+diff --git a/src/core/game.rs b/src/core/game.rs
+index 0caefc2..3c3271a 100644
+--- a/src/core/game.rs
++++ b/src/core/game.rs
+@@ -318,7 +318,7 @@ impl Game {
+ 
+     fn kill_monster(&mut self, idx: usize, how: &str) {
+         let m = self.monsters[idx].clone();
+-        let def = m.def.clone();
++        let tier = m.tier();
+         let name = m.name.clone();
+         self.player.kills += 1;
+         let xp = m.xp;
+@@ -327,9 +327,13 @@ impl Game {
+             crate::core::message::MessageKind::Good,
+             format!("{name} is {how} (+{xp} XP)"),
+         );
+-        self.emit(GameEvent::MonsterDeath { tier: def.tier });
+-        if crate::items::loot::maybe_drop(&mut self.rng, def.tier) {
+-            let drop = crate::items::loot::roll_drop(&mut self.rng, self.current_level, def.rarity);
++        self.emit(GameEvent::MonsterDeath { tier });
++        if crate::items::loot::maybe_drop(&mut self.rng, tier) {
++            let drop = crate::items::loot::roll_drop(
++                &mut self.rng,
++                self.current_level,
++                m.def.rarity,
++            );
+             let pos = m.pos;
+             self.current_mut().add_item(pos, drop);
+             self.log(
+@@ -339,7 +343,7 @@ impl Game {
+         }
+         {
+             let mut quests = self.quests.clone();
+-            quests.on_kill(self, &def);
++            quests.on_kill(self, &m.def);
+             self.quests = quests;
+         }
+         self.monsters.remove(idx);
+diff --git a/src/data/monsters.rs b/src/data/monsters.rs
+index 05511e9..9054c48 100644
+--- a/src/data/monsters.rs
++++ b/src/data/monsters.rs
+@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
+ 
+ use crate::entities::monster::Rarity;
+ 
+-#[derive(Debug, Clone, Serialize, Deserialize)]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ pub struct MonsterDef {
+     pub name: &'static str,
+     pub glyph: char,
+diff --git a/src/entities/monster.rs b/src/entities/monster.rs
+index 4633815..72a8b0c 100644
+--- a/src/entities/monster.rs
++++ b/src/entities/monster.rs
+@@ -13,9 +13,57 @@ pub enum Rarity {
+     Legendary,
+ }
+ 
+-#[derive(Debug, Clone, Serialize)]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++pub struct MonsterDefData {
++    pub name: String,
++    pub glyph: char,
++    pub tier: u8,
++    pub rarity: Rarity,
++    pub hp: u8,
++    pub xp: u32,
++    pub damage_die: u8,
++    pub attack: u8,
++    pub ac: u8,
++    pub speed: u8,
++}
++
++impl From<MonsterDef> for MonsterDefData {
++    fn from(d: MonsterDef) -> Self {
++        Self {
++            name: d.name.to_string(),
++            glyph: d.glyph,
++            tier: d.tier,
++            rarity: d.rarity,
++            hp: d.hp,
++            xp: d.xp,
++            damage_die: d.damage_die,
++            attack: d.attack,
++            ac: d.ac,
++            speed: d.speed,
++        }
++    }
++}
++
++impl From<&MonsterDef> for MonsterDefData {
++    fn from(d: &MonsterDef) -> Self {
++        Self {
++            name: d.name.to_string(),
++            glyph: d.glyph,
++            tier: d.tier,
++            rarity: d.rarity,
++            hp: d.hp,
++            xp: d.xp,
++            damage_die: d.damage_die,
++            attack: d.attack,
++            ac: d.ac,
++            speed: d.speed,
++        }
++    }
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct Monster {
+-    pub def: MonsterDef,
++    pub def: MonsterDefData,
+     pub name: String,
+     pub pos: (u8, u8),
+     pub hp: u8,
+@@ -27,33 +75,13 @@ pub struct Monster {
+     pub ability_cooldown: u8,
+ }
+ 
+-impl<'de> Deserialize<'de> for Monster {
+-    fn deserialize<D: serde::de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+-        use serde::de::IgnoredAny;
+-        let ignored = IgnoredAny::deserialize(d)?;
+-        let def = crate::data::monsters::MONSTERS[0].clone();
+-        Ok(Self {
+-            def,
+-            name: String::new(),
+-            pos: (0, 0),
+-            hp: 0,
+-            max_hp: 0,
+-            xp: 0,
+-            dead: false,
+-            is_unique: false,
+-            is_boss: false,
+-            ability_cooldown: 0,
+-        })
+-    }
+-}
+-
+ impl Monster {
+     pub fn new(def: MonsterDef, pos: (u8, u8)) -> Self {
+         let max_hp = def.hp;
+         let xp = def.xp;
+         Self {
+             name: def.name.to_string(),
+-            def,
++            def: def.into(),
+             pos,
+             hp: max_hp,
+             max_hp,
+@@ -66,6 +94,12 @@ impl Monster {
+     }
+ }
+ 
++impl Monster {
++    pub fn tier(&self) -> u8 {
++        self.def.tier
++    }
++}
++
+ /// Spawn a monster for the given depth.
+ pub fn spawn_monster(rng: &mut Rng, depth: u8, endless: bool) -> Monster {
+     let tier = tier_for_depth(depth);
+@@ -78,7 +112,7 @@ pub fn spawn_monster(rng: &mut Rng, depth: u8, endless: bool) -> Monster {
+         .copied()
+         .unwrap_or(&crate::data::monsters::MONSTERS[0])
+         .clone();
+-    let mut m = Monster::new(def, (0, 0));
+[0m
+[0m$ [0mgit -C /home/anonymous/projects/rougelike show 367ec2c -- src/save.rs src/quest.rs | cat
+commit 367ec2cf201b32834b27607550ebb20ed8d97afc
+Author: Michael Knopke <knopkem@gmail.com>
+Date:   Thu Aug 20 15:07:52 2026 +0200
+
+    fix 3
+
+diff --git a/src/quest.rs b/src/quest.rs
+index c445995..4b6fc0a 100644
+--- a/src/quest.rs
++++ b/src/quest.rs
+@@ -3,7 +3,7 @@
+ use serde::{Deserialize, Serialize};
+ 
+ use crate::core::game::Game;
+-use crate::data::monsters::MonsterDef;
++use crate::entities::monster::MonsterDefData;
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+ pub enum QuestStatus {
+@@ -66,7 +66,7 @@ impl QuestLog {
+         // Hook for quest progress checks.
+     }
+ 
+-    pub fn on_kill(&mut self, game: &mut Game, def: &MonsterDef) {
++    pub fn on_kill(&mut self, game: &mut Game, def: &MonsterDefData) {
+         // Track kills for quest 2.
+         if def.name.contains("Cultist") {
+             if let Some(q) = self.quests.iter_mut().find(|q| q.id == 2) {
+diff --git a/src/save.rs b/src/save.rs
+index 4a45a17..da3f091 100644
+--- a/src/save.rs
++++ b/src/save.rs
+@@ -146,6 +146,53 @@ mod tests {
+         });
+     }
+ 
++    #[test]
++    fn save_load_preserves_monsters() {
++        with_isolated_data_dir("monster_roundtrip", || {
++            let game = new_game(9);
++            assert!(!game.monsters.is_empty(), "fresh game must have monsters");
++            let before: Vec<_> = game
++                .monsters
++                .iter()
++                .map(|m| {
++                    (
++                        m.def.clone(),
++                        m.name.clone(),
++                        m.pos,
++                        m.hp,
++                        m.max_hp,
++                        m.xp,
++                        m.dead,
++                        m.is_unique,
++                        m.is_boss,
++                        m.ability_cooldown,
++                    )
++                })
++                .collect();
++            autosave(&game);
++            let loaded = load_autosave().expect("autosave should load");
++            let after: Vec<_> = loaded
++                .monsters
++                .iter()
++                .map(|m| {
++                    (
++                        m.def.clone(),
++                        m.name.clone(),
++                        m.pos,
++                        m.hp,
++                        m.max_hp,
++                        m.xp,
++                        m.dead,
++                        m.is_unique,
++                        m.is_boss,
++                        m.ability_cooldown,
++                    )
++                })
++                .collect();
++            assert_eq!(before, after, "save/load must preserve the monster list");
++        });
++    }
++
+     #[test]
+     fn death_turn_leaves_no_autosave() {
+         with_isolated_data_dir("death_turn", || {
+[0m
+[0m→ [0mRead .scratch/implement-all.log
+This is a log of the current session. The repo's latest commit (`367ec2c fix 3`) already contains the fix for this issue. Let me verify the code compiles and tests pass.
+[0m
+[0m$ [0mcargo test 2>&1 | tail -40
+running 23 tests
+test audio::synth::tests::sine_shape ... ok
+test core::message::tests::tail_order ... ok
+test entities::monster::tests::monster_survives_json_roundtrip ... ok
+test combat::tests::player_can_hit ... ok
+test core::message::tests::caps_at_max ... ok
+test audio::synth::tests::noise_range ... ok
+test map::fov::tests::wall_blocks ... ok
+test map::path::tests::straight_path ... ok
+test core::rng::tests::deterministic ... ok
+test map::path::tests::unreachable ... ok
+test map::fov::tests::sees_own_tile ... ok
+test hiscore::tests::death_and_victory_same_turn_record_once ... ok
+test hiscore::tests::victory_records_exactly_one_entry ... ok
+test hiscore::tests::death_records_exactly_one_entry ... ok
+test hiscore::tests::in_progress_run_records_nothing ... ok
+test save::tests::dead_game_autosave_writes_nothing ... ok
+test save::tests::load_rejects_won_autosave_on_disk ... ok
+test save::tests::save_load_preserves_monsters ... ok
+test save::tests::mid_run_autosave_writes_loadable_save ... ok
+test save::tests::won_game_autosave_writes_nothing ... ok
+test save::tests::victory_turn_leaves_no_autosave ... ok
+test save::tests::death_turn_leaves_no_autosave ... ok
+test save::tests::load_rejects_dead_autosave_on_disk ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src/main.rs (target/debug/deps/deepdelve-9b0f65f9e909d97f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests deepdelve
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[0m
+All 23 tests pass, including the round-trip tests. Checking for warnings:
+[0m$ [0mcargo check 2>&1 | tail -5 && cargo check --all-targets 2>&1 | tail -5
+|
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `deepdelve` (bin "deepdelve") generated 1 warning (run `cargo fix --bin "deepdelve" -p deepdelve` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `deepdelve` (bin "deepdelve") generated 1 warning (run `cargo fix --bin "deepdelve" -p deepdelve` to apply 1 suggestion)
+warning: `deepdelve` (bin "deepdelve" test) generated 1 warning (1 duplicate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.75s
+[0m
+[0m$ [0mcargo check 2>&1 | grep -B5 -A10 warning | head -40
+warning: unused import: `crate::map::fov`
+  --> src/core/game.rs:13:5
+   |
+13 | use crate::map::fov;
+   |     ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `LevelTheme`
+  --> src/core/game.rs:15:32
+   |
+15 | use crate::map::level::{Level, LevelTheme};
+   |                                ^^^^^^^^^^
+
+warning: unused import: `Quest`
+  --> src/core/game.rs:16:20
+   |
+16 | use crate::quest::{Quest, QuestLog};
+   |                    ^^^^^
+
+warning: unused import: `serde::de::Error`
+  --> src/core/rng.rs:28:13
+   |
+28 |         use serde::de::Error;
+   |             ^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::f64::consts`
+ --> src/map/path.rs:6:5
+  |
+6 | use std::f64::consts;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::core::game::Game`
+ --> src/status.rs:4:5
+  |
+4 | use crate::core::game::Game;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Screen`
+  --> src/ui/menu.rs:13:32
+[0m
+[0m$ [0mgit -C /home/anonymous/projects/rougelike stash list; git -C /home/anonymous/projects/rougelike stash show 2>/dev/null; echo "---checking warnings at b146185---"; git -C /home/anonymous/projects/rougelike worktree add /tmp/opencode/wt-b146 b146185 2>&1 | tail -1
+---checking warnings at b146185---
+HEAD is now at b146185 update readme
+[0m
+[0m$ [0mcargo check 2>&1 | grep -c "^warning" ; echo "---"; cargo check 2>&1 | grep "^warning: unused"
+19
+---
+warning: unused import: `crate::map::fov`
+warning: unused import: `LevelTheme`
+warning: unused import: `Quest`
+warning: unused import: `serde::de::Error`
+warning: unused import: `std::f64::consts`
+warning: unused import: `crate::core::game::Game`
+warning: unused import: `Screen`
+warning: unused import: `buffer::Cell`
+warning: unused import: `LevelTheme`
+warning: unused import: `RngLike`
+warning: unused import: `TryRng`
+warning: unused variable: `q`
+warning: unused variable: `ignored`
+warning: unused variable: `rng`
+warning: unused variable: `rarity`
+warning: unused import: `deepdelve::core::game::Game`
+[0m
+[0m$ [0mcargo check 2>&1 | grep -c "^warning"
+18
+[0m
+[0m✱ [0mGrep "IgnoredAny|ignored"[90m in src · 0 matches[0m
+[0m
+[0m$ [0mgit -C /home/anonymous/projects/rougelike worktree remove /tmp/opencode/wt-b146 --force
+(no output)
+[0m
+Warnings at b146185: 19 (including the `ignored` variable). At HEAD: 18 — the fix removed the stub warning without adding any new ones. Let me confirm no `IgnoredAny` remnants remain and clean up the worktree:
+[0m$ [0mgit -C /home/anonymous/projects/rougelike status --short && git -C /home/anonymous/projects/rougelike log --oneline -3
+?? .opencode/
+?? .scratch/implement-all.log
+?? scripts/
+367ec2c fix 3
+b146185 update readme
+e6c2a94 Address code review: dedup save test setup, fix harness comment (issue 02)
+[0m
+The issue is already fully implemented and committed — nothing left to do.
+
+**State found in the repo:**
+- Commit `367ec2c fix 3` (on `origin/master`) resolves issue 03: removes the `IgnoredAny` stub, adds `MonsterDefData` (owned `String` name, derived `Serialize`/`Deserialize`), `From<MonsterDef>`/`From<&MonsterDef>` conversions, updates `kill_monster`/`on_kill` call sites, and adds round-trip tests. The issue file's checkboxes were checked and an implementation note added in that same commit.
+- Working tree is clean; only untracked harness artifacts (`.opencode/`, `.scratch/implement-all.log`, `scripts/`) remain, which I'm not committing.
+
+**Verification (per your instructions):**
+- `cargo test`: 23/23 pass, including `monster_survives_json_roundtrip` (monster.rs) and `save_load_preserves_monsters` (save.rs, the full save→load acceptance test).
+- `cargo check`: no new warnings — 18 at HEAD vs 19 at `b146185`; the `unused variable: ignored` warning from the old stub is gone. All 18 remaining are pre-existing unused-import warnings in unrelated files.
+- `grep IgnoredAny` in `src/`: no matches.
+
+All three acceptance criteria are met, and since the work is already committed (as `fix 3`), I made no new commit.
+[03] WARNING: no new commit (agent may have skipped or work needs review)
+[03] END 15:48:32
+[04] START 15:48:32
+[0m
+> build · Qwen3.8-27B-IQ3_XXS
+[0m
+[0m→ [0mRead .scratch/deepdelve/issues/04-rng-resets-on-load.md
+[0m→ [0mRead AGENTS.md
+[0m✱ [0mGrep "ChaCha8Rng|Rng::new"[90m in . · 10 matches[0m
+[0m✱ [0mGlob "src/**/*.rs"[90m in . · 45 matches[0m
+[0m→ [0mRead src/core/rng.rs
+[0m→ [0mRead src/core/game.rs
+[0m→ [0mRead src/save.rs
+[0m→ [0mRead Cargo.toml
+Now let me check the save system and Cargo.toml:
+[0m✱ [0mGrep "rng\.seed|\.seed\b"[90m in src · 2 matches[0m
+[0m
+[0m$ [0mls ~/.cargo/registry/src/*/rand_chacha-0.10*/src/ 2>/dev/null; grep -n "serde" ~/.cargo/registry/src/*/rand_chacha-0.10*/src/lib.rs | head -30
+chacha.rs
+guts.rs
+lib.rs
+[0m
+Now let me check how `Rng.seed` and the rand_chacha serde feature look:
+[0m$ [0mgrep -n "serde\|Serialize" ~/.cargo/registry/src/*/rand_chacha-0.10*/src/lib.rs | head -40; grep -rn "derive" ~/.cargo/registry/src/*/rand_chacha-0.10*/src/lib.rs | head
+11://! These are native Rust implementations of RNGs derived from the
+[0m
+[0m$ [0mls ~/.cargo/registry/src/ && ls ~/.cargo/registry/src/*/ | grep -i chacha
+index.crates.io-1949cf8c6b5b557f
+chacha20-0.10.1
+chacha20-0.9.1
+chacha20poly1305-0.10.1
+rand_chacha-0.10.0
+rand_chacha-0.3.1
+rand_chacha-0.9.0
+[0m
+[0m$ [0mD=~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0; ls $D/src; cat $D/Cargo.toml | grep -A5 "\[features\]"; grep -rn "serde" $D/src | head
+chacha.rs
+guts.rs
+lib.rs
+[features]
+default = ["std"]
+serde = ["dep:serde"]
+std = ["ppv-lite86/std"]
+
+[lib]
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:17:#[cfg(feature = "serde")]
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:18:use serde::{Deserialize, Deserializer, Serialize, Serializer};
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:219:        #[cfg(feature = "serde")]
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:228:        #[cfg(feature = "serde")]
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:239:            #[cfg(feature = "serde")]
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:240:            use serde::{Deserialize, Serialize};
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:246:            #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:303:    #[cfg(feature = "serde")]
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:309:    #[cfg(feature = "serde")]
+/home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0/src/chacha.rs:311:    fn test_chacha_serde_roundtrip() {
+[0m
+[0m$ [0mD=~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_chacha-0.10.0; sed -n 150,310p $D/src/chacha.rs
+let word_pos = u128::from(block_counter) * u128::from(BLOCK_WORDS);
+                word_pos + self.rng.word_offset() as u128
+            }
+
+            /// Set the offset from the start of the stream, in 32-bit words.
+            ///
+            /// As with `get_word_pos`, we use a 68-bit number. Since the generator
+            /// simply cycles at the end of its period (1 ZiB), we ignore the upper
+            /// 60 bits.
+            #[inline]
+            pub fn set_word_pos(&mut self, word_offset: u128) {
+                let block = (word_offset / u128::from(BLOCK_WORDS)) as u64;
+                self.rng.core.state.set_block_pos(block);
+                self.rng
+                    .reset_and_skip((word_offset % u128::from(BLOCK_WORDS)) as usize);
+            }
+
+            /// Set the stream number.
+            ///
+            /// This is initialized to zero; 2<sup>64</sup> unique streams of output
+            /// are available per seed/key.
+            ///
+            /// Note that in order to reproduce ChaCha output with a specific 64-bit
+            /// nonce, one can convert that nonce to a `u64` in little-endian fashion
+            /// and pass to this function. In theory a 96-bit nonce can be used by
+            /// passing the last 64-bits to this function and using the first 32-bits as
+            /// the most significant half of the 64-bit counter (which may be set
+            /// indirectly via `set_word_pos`), but this is not directly supported.
+            #[inline]
+            pub fn set_stream(&mut self, stream: u64) {
+                self.rng.core.state.set_nonce(stream);
+                if self.rng.word_offset() != 0 {
+                    let wp = self.get_word_pos();
+                    self.set_word_pos(wp);
+                }
+            }
+
+            /// Get the stream number.
+            #[inline]
+            pub fn get_stream(&self) -> u64 {
+                self.rng.core.state.get_nonce()
+            }
+
+            /// Get the seed.
+            #[inline]
+            pub fn get_seed(&self) -> [u8; 32] {
+                self.rng.core.state.get_seed()
+            }
+        }
+
+        impl TryCryptoRng for $ChaChaXRng {}
+
+        impl From<$ChaChaXCore> for $ChaChaXRng {
+            fn from(core: $ChaChaXCore) -> Self {
+                $ChaChaXRng {
+                    rng: BlockRng::new(core),
+                }
+            }
+        }
+
+        impl PartialEq<$ChaChaXRng> for $ChaChaXRng {
+            fn eq(&self, rhs: &$ChaChaXRng) -> bool {
+                let a: $abst::$ChaChaXRng = self.into();
+                let b: $abst::$ChaChaXRng = rhs.into();
+                a == b
+            }
+        }
+        impl Eq for $ChaChaXRng {}
+
+        #[cfg(feature = "serde")]
+        impl Serialize for $ChaChaXRng {
+            fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                $abst::$ChaChaXRng::from(self).serialize(s)
+            }
+        }
+        #[cfg(feature = "serde")]
+        impl<'de> Deserialize<'de> for $ChaChaXRng {
+            fn deserialize<D>(d: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                $abst::$ChaChaXRng::deserialize(d).map(|x| Self::from(&x))
+            }
+        }
+
+        mod $abst {
+            #[cfg(feature = "serde")]
+            use serde::{Deserialize, Serialize};
+
+            // The abstract state of a ChaCha stream, independent of implementation choices. The
+            // comparison and serialization of this object is considered a semver-covered part of
+            // the API.
+            #[derive(Debug, PartialEq, Eq)]
+            #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+            pub(crate) struct $ChaChaXRng {
+                seed: [u8; 32],
+                stream: u64,
+                word_pos: u128,
+            }
+
+            impl From<&super::$ChaChaXRng> for $ChaChaXRng {
+                // Forget all information about the input except what is necessary to determine the
+                // outputs of any sequence of pub API calls.
+                fn from(r: &super::$ChaChaXRng) -> Self {
+                    Self {
+                        seed: r.get_seed(),
+                        stream: r.get_stream(),
+                        word_pos: r.get_word_pos(),
+                    }
+                }
+            }
+
+            impl From<&$ChaChaXRng> for super::$ChaChaXRng {
+                // Construct one of the possible concrete RNGs realizing an abstract state.
+                fn from(a: &$ChaChaXRng) -> Self {
+                    use rand_core::SeedableRng;
+                    let mut r = Self::from_seed(a.seed);
+                    r.set_stream(a.stream);
+                    r.set_word_pos(a.word_pos);
+                    r
+                }
+            }
+        }
+    };
+}
+
+chacha_impl!(
+    ChaCha20Core,
+    ChaCha20Rng,
+    10,
+    "ChaCha with 20 rounds",
+    abstract20,
+);
+chacha_impl!(
+    ChaCha12Core,
+    ChaCha12Rng,
+    6,
+    "ChaCha with 12 rounds",
+    abstract12,
+);
+chacha_impl!(
+    ChaCha8Core,
+    ChaCha8Rng,
+    4,
+    "ChaCha with 8 rounds",
+    abstract8,
+);
+
+#[cfg(test)]
+mod test {
+    #[cfg(feature = "serde")]
+    use super::{ChaCha8Rng, ChaCha12Rng, ChaCha20Rng};
+    use rand_core::{Rng, SeedableRng};
+
+    type ChaChaRng = super::ChaCha20Rng;
+
+    #[cfg(feature = "serde")]
+    #[test]
+[0m
+[0m✱ [0mGrep "mod tests_harness"[90m in src · 1 match[0m
+Let me check the test harness and how `Rng` flows through the harness:
+[0m→ [0mRead src/lib.rs
+[0m✱ [0mGrep "\.rng\b"[90m in src · 21 matches[0m
+[0m
+[0m← [0mEdit Cargo.toml
+Index: /home/anonymous/projects/rougelike/Cargo.toml
+===================================================================
+--- /home/anonymous/projects/rougelike/Cargo.toml
++++ /home/anonymous/projects/rougelike/Cargo.toml
+@@ -13,9 +13,9 @@
+ rand_core = "0.10"
+ serde_json = "1.0"
+ dirs = "6"
+ thiserror = "2"
+-rand_chacha = "0.10"
++rand_chacha = { version = "0.10", features = ["serde"] }
+ 
+ [dependencies.rodio]
+ version = "0.22"
+ default-features = false
+
+[0m
+[0m← [0mEdit src/core/rng.rs
+Index: /home/anonymous/projects/rougelike/src/core/rng.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/rng.rs
++++ /home/anonymous/projects/rougelike/src/core/rng.rs
+@@ -1,9 +1,11 @@
+ //! Seeded RNG wrapper. All randomness in the game flows through here so
+ //! that a run is fully reproducible from a seed.
+ //!
+-//! The stream is a plain `StdRng` (ChaCha12). Saves only persist the seed;
+-//! the in-memory stream is the source of truth, which keeps saves small.
++//! The stream is ChaCha8. Saves persist the generator's full state (plus
++//! the original seed as plain metadata), so the random stream continues
++//! exactly where it left off after a load instead of replaying the run's
++//! prefix.
+ 
+ use rand::RngExt;
+ use rand_core::{SeedableRng, TryRng};
+ use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+[0m
+I have the full picture. Now implementing:
+[0m← [0mEdit src/core/rng.rs
+Index: /home/anonymous/projects/rougelike/src/core/rng.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/rng.rs
++++ /home/anonymous/projects/rougelike/src/core/rng.rs
+@@ -20,17 +20,19 @@
+ }
+ 
+ impl Serialize for Rng {
+     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+-        s.serialize_u64(self.seed)
++        // Persist the seed (metadata) and the full inner generator state,
++        // so a loaded run continues the same random stream.
++        (self.seed, &self.inner).serialize(s)
+     }
+ }
+ 
+ impl<'de> Deserialize<'de> for Rng {
+     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+         use serde::de::Error;
+-        let seed = u64::deserialize(d).map_err(|e: D::Error| e)?;
+-        Ok(Self::new(seed))
++        let (seed, inner) = <(u64, ChaCha)>::deserialize(d).map_err(|e: D::Error| e)?;
++        Ok(Self { seed, inner })
+     }
+ }
+ 
+ impl Rng {
+
+[0m
+[0m← [0mEdit src/core/rng.rs
+Index: /home/anonymous/projects/rougelike/src/core/rng.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/rng.rs
++++ /home/anonymous/projects/rougelike/src/core/rng.rs
+@@ -141,5 +141,26 @@
+         for _ in 0..100 {
+             assert_eq!(a.u64(), b.u64());
+         }
+     }
++
++    #[test]
++    fn roundtrip_continues_stream() {
++        let mut a = Rng::new(42);
++        // Advance the stream, then record what the next draws would be
++        // without a save.
++        let prefix: Vec<u64> = (0..8).map(|_| a.u64()).collect();
++        let expected: Vec<u64> = (0..16).map(|_| a.u64()).collect();
++
++        let json = serde_json::to_string(&a).unwrap();
++        let loaded: Rng = serde_json::from_str(&json).unwrap();
++        assert_eq!(loaded.seed, 42, "seed stays available as metadata");
++        let mut b = loaded;
++
++        let after: Vec<u64> = (0..16).map(|_| b.u64()).collect();
++        assert_eq!(after, expected, "stream must continue where it left off");
++        assert_ne!(
++            after, prefix,
++            "load must not replay the run-start prefix"
++        );
++    }
+ }
+
+[0m
+Now add tests covering the acceptance criteria:
+[0m← [0mEdit src/save.rs
+Index: /home/anonymous/projects/rougelike/src/save.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/save.rs
++++ /home/anonymous/projects/rougelike/src/save.rs
+@@ -193,8 +193,28 @@
+     });
+ }
+ 
+ #[test]
++fn save_load_rng_stream_continues() {
++    with_isolated_data_dir("rng_stream", || {
++        let mut game = new_game(11);
++        // Advance the stream past the run-start prefix.
++        let _prefix: Vec<u64> = (0..8).map(|_| game.rng.u64()).collect();
++        let expected: Vec<u64> = (0..16).map(|_| game.rng.u64()).collect();
++
++        autosave(&game);
++        let mut loaded = load_autosave().expect("autosave should load");
++        assert_eq!(loaded.seed, game.seed);
++
++        let after: Vec<u64> = (0..16).map(|_| loaded.rng.u64()).collect();
++        assert_eq!(
++            after, expected,
++            "post-load draws must continue the stream, not replay the prefix"
++        );
++    });
++}
++
++#[test]
+ fn death_turn_leaves_no_autosave() {
+     with_isolated_data_dir("death_turn", || {
+         let mut game = new_game(6);
+         game.monsters.clear();
+
+[0m
+[0m$ [0mcargo test 2>&1 | tail -40
+test core::rng::tests::deterministic ... ok
+test hiscore::tests::in_progress_run_records_nothing ... ok
+test hiscore::tests::death_and_victory_same_turn_record_once ... ok
+test hiscore::tests::victory_records_exactly_one_entry ... ok
+test hiscore::tests::death_records_exactly_one_entry ... ok
+test save::tests::dead_game_autosave_writes_nothing ... ok
+test save::tests::death_turn_leaves_no_autosave ... ok
+test save::tests::load_rejects_dead_autosave_on_disk ... ok
+test save::tests::load_rejects_won_autosave_on_disk ... ok
+test save::tests::mid_run_autosave_writes_loadable_save ... ok
+test save::tests::save_load_preserves_monsters ... ok
+test save::tests::save_load_rng_stream_continues ... FAILED
+test save::tests::victory_turn_leaves_no_autosave ... ok
+test save::tests::won_game_autosave_writes_nothing ... ok
+
+failures:
+
+---- core::rng::tests::roundtrip_continues_stream stdout ----
+
+thread 'core::rng::tests::roundtrip_continues_stream' (139001) panicked at src/core/rng.rs:160:9:
+assertion `left == right` failed: stream must continue where it left off
+  left: [709353063579077124, 4829755133369728407, 15491131302928388465, 14008986064507162301, 12396337209942585769, 12582931927345169831, 12437814383306842903, 1841754590950016055, 3737970769775807255, 4043632453527161836, 14119089074600487752, 12841494857048962050, 7827611443821146160, 1210377924565601529, 16261214877113852211, 12103329371965197203]
+ right: [14227028876630821888, 4401121311800897944, 9350043436605376040, 16635332319643196323, 17653354571726536749, 10938523927967171405, 13443959161786668970, 3304483495961147300, 10614130117109688397, 3168455021757892323, 8191319777620403455, 1409165301955871501, 2851098036599004855, 5910904342370227653, 12906965256452577593, 1446325983400578370]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- save::tests::save_load_rng_stream_continues stdout ----
+
+thread 'save::tests::save_load_rng_stream_continues' (139017) panicked at src/save.rs:209:13:
+assertion `left == right` failed: post-load draws must continue the stream, not replay the prefix
+  left: [18312371998903262086, 3234373073705597197, 13283914642305974723, 17435050457835569050, 14723200430142411428, 2198124207090782447, 3255237560110866652, 16320747766933416220, 13155502247764157, 4701607395119218346, 6953376833618464041, 15244865970001578296, 8218680764281732154, 18023995067437319085, 5140137176222442945, 10751605132136566649]
+ right: [14626197055976234318, 6038533110818548847, 3746197558820624952, 5555292779215026907, 12878471670786540078, 14288365731982197720, 1094502742115301150, 560309241873276267, 4246631593685615299, 14984528200931677258, 5636463307819209291, 10432979689545054483, 7763392502113952445, 12486620334130332349, 16565435821847926021, 18055976946371489836]
+
+
+failures:
+    core::rng::tests::roundtrip_continues_stream
+    save::tests::save_load_rng_stream_continues
+
+test result: FAILED. 23 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `--lib`
+[0m
+[0m$ [0mmkdir -p /tmp/opencode/dbg && cat > /tmp/opencode/dbg.rs <<'EOF'
+use rand::RngExt;
+use rand_chacha::ChaCha8Rng;
+use rand_core::{SeedableRng, TryRng};
+
+fn main() {
+    let mut a: ChaCha8Rng = ChaCha8Rng::seed_from_u64(42);
+    let mut draws = Vec::new();
+    for _ in 0..24 { draws.push(a.try_next_u64().unwrap()); }
+    let before = a.try_next_u64().unwrap();
+    let j = serde_json::to_string(&a).unwrap();
+    println!("json: {j}");
+    let b: ChaCha8Rng = serde_json::from_str(&j).unwrap();
+    let mut b = b;
+    let after = b.try_next_u64().unwrap();
+    println!("before={before} after={after} match={}", before == after);
+    // also check get_word_pos
+    let mut c: ChaCha8Rng = ChaCha8Rng::seed_from_u64(42);
+    for _ in 0..24 { c.try_next_u64().unwrap(); }
+    println!("wp={}", c.get_word_pos());
+}
+EOF
+cd /tmp/opencode/dbg && cp /home/anonymous/projects/rougelike/Cargo.toml /dev/null 2>/dev/null; echo done
+done
+[0m
+The roundtrip itself is failing — let me debug the rand_chacha serde behavior directly:
+[0m$ [0mcd /home/anonymous/projects/rougelike && cat >> /tmp/opencode/dbg_test.rs <<'EOF'
+EOF
+cat > /tmp/opencode/probe.rs <<'EOF'
+    #[test]
+    fn probe_serde() {
+        use rand_chacha::ChaCha8Rng as C;
+        use rand_core::SeedableRng;
+        let mut a: C = C::seed_from_u64(42);
+        for _ in 0..24 { a.try_next_u64().unwrap(); }
+        let before = a.try_next_u64().unwrap();
+        let j = serde_json::to_string(&a).unwrap();
+        let mut b: C = serde_json::from_str(&j).unwrap();
+        let after = b.try_next_u64().unwrap();
+        println!("json={j}\nbefore={before}\nafter={after}\neq={}", before == after);
+    }
+EOF
+echo ok
+ok
+[0m
+[0m$ [0mpython3 - <<'EOF'
+import re
+p='src/core/rng.rs'
+s=open(p).read()
+probe='''
+    #[test]
+    fn probe_serde() {
+        use rand_chacha::ChaCha8Rng as C;
+        use rand_core::SeedableRng;
+        let mut a: C = C::seed_from_u64(42);
+        for _ in 0..24 { a.try_next_u64().unwrap(); }
+        let before = a.try_next_u64().unwrap();
+        let j = serde_json::to_string(&a).unwrap();
+        let mut b: C = serde_json::from_str(&j).unwrap();
+        let after = b.try_next_u64().unwrap();
+        println!("json={j}");
+        println!("before={before}\\nafter={after}\\neq={}", before == after);
+    }
+'''
+i=s.rfind('}')
+s=s[:i]+probe+s[i:]
+open(p,'w').write(s)
+EOF
+cargo test --lib probe_serde -- --nocapture 2>&1 | grep -A6 "json="
+json={"seed":[164,143,161,123,88,50,61,10,234,184,161,204,105,1,20,184,43,140,200,117,24,180,247,84,141,68,110,161,228,223,32,242],"stream":0,"word_pos":50}
+before=709353063579077124
+after=4829755133369728407
+eq=false
+test core::rng::tests::probe_serde ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.00s
+[0m
+[0m$ [0mD=~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f; sed -n 300,340p $D/rand_chacha-0.10.0/src/chacha.rs
+#[cfg(test)]
+mod test {
+    #[cfg(feature = "serde")]
+    use super::{ChaCha8Rng, ChaCha12Rng, ChaCha20Rng};
+    use rand_core::{Rng, SeedableRng};
+
+    type ChaChaRng = super::ChaCha20Rng;
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_chacha_serde_roundtrip() {
+        let seed = [
+            1, 0, 52, 0, 0, 0, 0, 0, 1, 0, 10, 0, 22, 32, 0, 0, 2, 0, 55, 49, 0, 11, 0, 0, 3, 0, 0,
+            0, 0, 0, 2, 92,
+        ];
+        let mut rng1 = ChaCha20Rng::from_seed(seed);
+        let mut rng2 = ChaCha12Rng::from_seed(seed);
+        let mut rng3 = ChaCha8Rng::from_seed(seed);
+
+        let encoded1 = serde_json::to_string(&rng1).unwrap();
+        let encoded2 = serde_json::to_string(&rng2).unwrap();
+        let encoded3 = serde_json::to_string(&rng3).unwrap();
+
+        let mut decoded1: ChaCha20Rng = serde_json::from_str(&encoded1).unwrap();
+        let mut decoded2: ChaCha12Rng = serde_json::from_str(&encoded2).unwrap();
+        let mut decoded3: ChaCha8Rng = serde_json::from_str(&encoded3).unwrap();
+
+        assert_eq!(rng1, decoded1);
+        assert_eq!(rng2, decoded2);
+        assert_eq!(rng3, decoded3);
+
+        assert_eq!(rng1.next_u32(), decoded1.next_u32());
+        assert_eq!(rng2.next_u32(), decoded2.next_u32());
+        assert_eq!(rng3.next_u32(), decoded3.next_u32());
+    }
+
+    // This test validates that:
+    // 1. a hard-coded serialization demonstrating the format at time of initial release can still
+    //    be deserialized to a ChaChaRng
+    // 2. re-serializing the resultant object produces exactly the original string
+[0m
+The state JSON looks right (word_pos=50) but the resume differs. Let me check rand_chacha's own roundtrip test and the core crate:
+[0m$ [0mD=~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f; sed -n 340,420p $D/rand_chacha-0.10.0/src/chacha.rs
+// 2. re-serializing the resultant object produces exactly the original string
+    //
+    // Condition 2 is stronger than necessary: an equivalent serialization (e.g. with field order
+    // permuted, or whitespace differences) would also be admissible, but would fail this test.
+    // However testing for equivalence of serialized data is difficult, and there shouldn't be any
+    // reason we need to violate the stronger-than-needed condition, e.g. by changing the field
+    // definition order.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_chacha_serde_format_stability() {
+        let j = r#"{"seed":[4,8,15,16,23,42,4,8,15,16,23,42,4,8,15,16,23,42,4,8,15,16,23,42,4,8,15,16,23,42,4,8],"stream":27182818284,"word_pos":314159265359}"#;
+        let r: ChaChaRng = serde_json::from_str(j).unwrap();
+        let j1 = serde_json::to_string(&r).unwrap();
+        assert_eq!(j, j1);
+    }
+
+    #[test]
+    fn test_chacha_construction() {
+        let seed = [
+            0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let mut rng1 = ChaChaRng::from_seed(seed);
+        assert_eq!(rng1.next_u32(), 137206642);
+
+        let mut rng2 = ChaChaRng::from_rng(&mut rng1);
+        assert_eq!(rng2.next_u32(), 1325750369);
+    }
+
+    #[test]
+    fn test_chacha_true_values_a() {
+        // Test vectors 1 and 2 from
+        // https://tools.ietf.org/html/draft-nir-cfrg-chacha20-poly1305-04
+        let seed = [0u8; 32];
+        let mut rng = ChaChaRng::from_seed(seed);
+
+        let mut results = [0u32; 16];
+        for i in results.iter_mut() {
+            *i = rng.next_u32();
+        }
+        let expected = [
+            0xade0b876, 0x903df1a0, 0xe56a5d40, 0x28bd8653, 0xb819d2bd, 0x1aed8da0, 0xccef36a8,
+            0xc70d778b, 0x7c5941da, 0x8d485751, 0x3fe02477, 0x374ad8b8, 0xf4b8436a, 0x1ca11815,
+            0x69b687c3, 0x8665eeb2,
+        ];
+        assert_eq!(results, expected);
+
+        for i in results.iter_mut() {
+            *i = rng.next_u32();
+        }
+        let expected = [
+            0xbee7079f, 0x7a385155, 0x7c97ba98, 0x0d082d73, 0xa0290fcb, 0x6965e348, 0x3e53c612,
+            0xed7aee32, 0x7621b729, 0x434ee69c, 0xb03371d5, 0xd539d874, 0x281fed31, 0x45fb0a51,
+            0x1f0ae1ac, 0x6f4d794b,
+        ];
+        assert_eq!(results, expected);
+    }
+
+    #[test]
+    fn test_chacha_true_values_b() {
+        // Test vector 3 from
+        // https://tools.ietf.org/html/draft-nir-cfrg-chacha20-poly1305-04
+        let seed = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 1,
+        ];
+        let mut rng = ChaChaRng::from_seed(seed);
+
+        // Skip block 0
+        for _ in 0..16 {
+            rng.next_u32();
+        }
+
+        let mut results = [0u32; 16];
+        for i in results.iter_mut() {
+            *i = rng.next_u32();
+        }
+        let expected = [
+            0x2452eb3a, 0x9249f8ec, 0x8d829d9b, 0xddd4ceb1, 0xe8252083, 0x60818b01, 0xf38422b8,
+            0x5aaa49c9, 0xbb00ca8e, 0xda3ba7b4, 0xc4b592d1, 0xfdf2732f, 0x4436274e, 0x2561b3c8,
+            0xebdd4aa6, 0xa0136c00,
+[0m
+[0m$ [0mD=~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f; sed -n 100,155p $D/rand_chacha-0.10.0/src/chacha.rs
+rng: BlockRng<$ChaChaXCore>,
+        }
+
+        impl SeedableRng for $ChaChaXRng {
+            type Seed = [u8; 32];
+
+            #[inline]
+            fn from_seed(seed: Self::Seed) -> Self {
+                let core = $ChaChaXCore::from_seed(seed);
+                Self {
+                    rng: BlockRng::new(core),
+                }
+            }
+        }
+
+        impl TryRng for $ChaChaXRng {
+            type Error = Infallible;
+
+            #[inline]
+            fn try_next_u32(&mut self) -> Result<u32, Infallible> {
+                Ok(self.rng.next_word())
+            }
+
+            #[inline]
+            fn try_next_u64(&mut self) -> Result<u64, Infallible> {
+                Ok(self.rng.next_u64_from_u32())
+            }
+
+            #[inline]
+            fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), Infallible> {
+                Ok(self.rng.fill_bytes(bytes))
+            }
+        }
+
+        impl $ChaChaXRng {
+            // The buffer is a 4-block window, i.e. it is always at a block-aligned position in the
+            // stream but if the stream has been sought it may not be self-aligned.
+
+            /// Get the offset from the start of the stream, in 32-bit words.
+            ///
+            /// Since the generated blocks are 16 words (2<sup>4</sup>) long and the
+            /// counter is 64-bits, the offset is a 68-bit number. Sub-word offsets are
+            /// not supported, hence the result can simply be multiplied by 4 to get a
+            /// byte-offset.
+            #[inline]
+            pub fn get_word_pos(&self) -> u128 {
+                let mut block_counter = self.rng.core.state.get_block_pos();
+                if self.rng.word_offset() != 0 {
+                    block_counter = block_counter.wrapping_sub(BUF_BLOCKS as u64);
+                }
+                let word_pos = u128::from(block_counter) * u128::from(BLOCK_WORDS);
+                word_pos + self.rng.word_offset() as u128
+            }
+
+            /// Set the offset from the start of the stream, in 32-bit words.
+            ///
+[0m
+Their tests only check resuming from fresh state. Let me verify whether `set_word_pos(get_word_pos())` is even an inverse at advanced positions:
+[0m$ [0mpython3 - <<'EOF'
+p='src/core/rng.rs'
+s=open(p).read()
+probe='''
+    #[test]
+    fn probe_seek() {
+        use rand_chacha::ChaCha8Rng as C;
+        use rand_core::SeedableRng;
+        for &words in &[0u64, 1, 2, 15, 16, 17, 32, 48, 50, 100] {
+            let mut a = C::seed_from_u64(42);
+            for _ in 0..words { a.try_next_u32().unwrap(); }
+            let expected = a.try_next_u32().unwrap();
+            let mut c = C::seed_from_u64(42);
+            c.set_word_pos(words);
+            let got = c.try_next_u32().unwrap();
+            println!("words={} expected={expected} got={got} ok={}", words, expected == got);
+        }
+    }
+'''
+i=s.rfind('}')
+s=s[:i]+probe+s[i:]
+open(p,'w').write(s)
+EOF
+cargo test --lib probe_seek -- --nocapture 2>&1 | grep -E "words=|test result"
+(no output)
+[0m
+[0m$ [0mcargo test --lib probe_seek -- --nocapture 2>&1 | tail -20
+11 |     for q in &game.quests.completed {
+   |         ^ help: if this is intentional, prefix it with an underscore: `_q`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `rng`
+  --> src/entities/player.rs:37:53
+   |
+37 |     pub fn new(name: &str, race: &str, class: &str, rng: &mut Rng) -> Self {
+   |                                                     ^^^ help: if this is intentional, prefix it with an underscore: `_rng`
+
+warning: unused variable: `rarity`
+  --> src/items/loot.rs:34:44
+   |
+34 | pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+For more information about this error, try `rustc --explain E0308`.
+warning: `deepdelve` (lib test) generated 14 warnings
+error: could not compile `deepdelve` (lib test) due to 1 previous error; 14 warnings emitted
+[0m
+[0m$ [0mcargo test --lib probe_seek 2>&1 | grep -B2 -A8 "E0308\|error\["
+|                                ^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src/core/rng.rs:190:28
+    |
+190 |             c.set_word_pos(words);
+    |               ------------ ^^^^^ expected `u128`, found `u64`
+    |               |
+    |               arguments to this method are incorrect
+    |
+note: method defined here
+--
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+For more information about this error, try `rustc --explain E0308`.
+warning: `deepdelve` (lib test) generated 14 warnings
+error: could not compile `deepdelve` (lib test) due to 1 previous error; 14 warnings emitted
+[0m
+[0m$ [0msed -i 's/c.set_word_pos(words);/c.set_word_pos(words as u128);/' src/core/rng.rs && cargo test --lib probe_seek -- --nocapture 2>&1 | grep -E "words=|test result"
+words=0 expected=962419617 got=962419617 ok=true
+words=1 expected=2928721845 got=2928721845 ok=true
+words=2 expected=628724104 got=628724104 ok=true
+words=15 expected=3452607245 got=3452607245 ok=true
+words=16 expected=2697858048 got=2697858048 ok=true
+words=17 expected=3312488290 got=3312488290 ok=true
+words=32 expected=4263061581 got=4263061581 ok=true
+words=48 expected=1593264644 got=1593264644 ok=true
+words=50 expected=1688157591 got=1688157591 ok=true
+words=100 expected=557577682 got=557577682 ok=true
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 26 filtered out; finished in 0.00s
+[0m
+`set_word_pos` works fine — so the problem is the seed itself. The JSON seed `[164,143,...]` doesn't look like a u64 expansion of 42. Let me test whether `from_seed(get_seed())` is identity:
+[0m$ [0mpython3 - <<'EOF'
+p='src/core/rng.rs'
+s=open(p).read()
+i=s.rfind('}')
+probe='''
+    #[test]
+    fn probe_seed() {
+        use rand_chacha::ChaCha8Rng as C;
+        use rand_core::SeedableRng;
+        let a = C::seed_from_u64(42);
+        let s = a.get_seed();
+        println!("seed={s:?}");
+        let fresh = C::from_seed(s);
+        let x1 = a.next_u32();
+        let x2 = fresh.next_u32();
+        println!("x1={x1} x2={x2} eq={}", x1 == x2);
+        // what does seed_from_u64 actually store?
+        let b = C::seed_from_u64(42);
+        println!("b_seed={:?} stream={}", b.get_seed(), b.get_stream());
+    }
+'''
+s=s[:i]+probe+s[i:]
+open(p,'w').write(s)
+EOF
+cargo test --lib probe_seed -- --nocapture 2>&1 | grep -E "seed=|x1=|b_seed|stream|test result"
+(no output)
+[0m
+[0m$ [0mcargo test --lib probe_seed 2>&1 | grep -B3 -A8 "error"  | head -30
+13 | use crate::map::level::{Level, LevelTheme, MAP_H, MAP_W};
+   |                                ^^^^^^^^^^
+
+error[E0599]: no method named `next_u32` found for struct `ChaCha8Rng` in the current scope
+   --> src/core/rng.rs:204:20
+    |
+204 |         let x1 = a.next_u32();
+    |                    ^^^^^^^^
+    |
+   ::: /home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_core-0.10.1/src/lib.rs:51:8
+    |
+ 51 |     fn next_u32(&mut self) -> u32;
+--
+204 |         let x1 = a.try_next_u32();
+    |                    ++++
+
+error[E0599]: no method named `next_u32` found for struct `ChaCha8Rng` in the current scope
+   --> src/core/rng.rs:205:24
+    |
+205 |         let x2 = fresh.next_u32();
+    |                        ^^^^^^^^
+    |
+   ::: /home/anonymous/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_core-0.10.1/src/lib.rs:51:8
+    |
+ 51 |     fn next_u32(&mut self) -> u32;
+--
+34 | pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+For more information about this error, try `rustc --explain E0599`.
+[0m
+[0m$ [0msed -i 's/        use rand_core::SeedableRng;\n/        use rand_core::SeedableRng;/' src/core/rng.rs; python3 - <<'EOF'
+p='src/core/rng.rs'
+s=open(p).read()
+s=s.replace("""    #[test]
+    fn probe_seed() {
+        use rand_chacha::ChaCha8Rng as C;
+        use rand_core::SeedableRng;
+        let a = C::seed_from_u64(42);
+        let s = a.get_seed();""",
+"""    #[test]
+    fn probe_seed() {
+        use rand_chacha::ChaCha8Rng as C;
+        use rand_core::SeedableRng;
+        let mut a = C::seed_from_u64(42);
+        let s = a.get_seed();""")
+s=s.replace("        let fresh = C::from_seed(s);", "        let mut fresh = C::from_seed(s);")
+open(p,'w').write(s)
+EOF
+cargo test --lib probe_seed -- --nocapture 2>&1 | grep -E "seed=|x1=|b_seed|test result" 
+(no output)
+[0m
+[0m$ [0mcargo test --lib probe_seed -- --nocapture 2>&1 | tail -25
+= note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `q`
+  --> src/core/score.rs:11:9
+   |
+11 |     for q in &game.quests.completed {
+   |         ^ help: if this is intentional, prefix it with an underscore: `_q`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `rng`
+  --> src/entities/player.rs:37:53
+   |
+37 |     pub fn new(name: &str, race: &str, class: &str, rng: &mut Rng) -> Self {
+   |                                                     ^^^ help: if this is intentional, prefix it with an underscore: `_rng`
+
+warning: unused variable: `rarity`
+  --> src/items/loot.rs:34:44
+   |
+34 | pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `deepdelve` (lib test) generated 14 warnings
+error: could not compile `deepdelve` (lib test) due to 2 previous errors; 14 warnings emitted
+[0m
+[0m$ [0msed -i 's/let x1 = a.next_u32();/let x1 = a.try_next_u32().unwrap();/; s/let x2 = fresh.next_u32();/let x2 = fresh.try_next_u32().unwrap();/' src/core/rng.rs && cargo test --lib probe_seed -- --nocapture 2>&1 | grep -E "seed=|x1=|b_seed|test result"
+seed=[164, 143, 161, 123, 88, 50, 61, 10, 234, 184, 161, 204, 105, 1, 20, 184, 43, 140, 200, 117, 24, 180, 247, 84, 141, 68, 110, 161, 228, 223, 32, 242]
+x1=962419617 x2=962419617 eq=true
+b_seed=[164, 143, 161, 123, 88, 50, 61, 10, 234, 184, 161, 204, 105, 1, 20, 184, 43, 140, 200, 117, 24, 180, 247, 84, 141, 68, 110, 161, 228, 223, 32, 242] stream=0
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+[0m
+`from_seed(get_seed())` is identity, so the suspect is `set_stream` in the deserialization path. Let me replicate the exact deserialization sequence:
+[0m$ [0mpython3 - <<'EOF'
+p='src/core/rng.rs'
+s=open(p).read()
+i=s.rfind('}')
+probe='''
+    #[test]
+    fn probe_path() {
+        use rand_chacha::ChaCha8Rng as C;
+        use rand_core::SeedableRng;
+        let s = C::seed_from_u64(42).get_seed();
+        // replicate Deserialize: from_seed, set_stream(0), set_word_pos(50)
+        let mut c = C::from_seed(s);
+        c.set_stream(0);
+        c.set_word_pos(50);
+        let got = c.try_next_u32().unwrap();
+        // reference: fresh, advance 50 words
+        let mut r = C::seed_from_u64(42);
+        for _ in 0..50 { r.try_next_u32().unwrap(); }
+        let exp = r.try_next_u32().unwrap();
+        println!("got={got} exp={exp} eq={}", got == exp);
+        // without set_stream
+        let mut d = C::from_seed(s);
+        d.set_word_pos(50);
+        let got2 = d.try_next_u32().unwrap();
+        println!("got2={got2} eq2={}", got2 == exp);
+        // fresh + set_word_pos(50) but check get_word_pos after
+        let mut e = C::from_seed(s);
+        e.set_stream(0);
+        e.set_word_pos(50);
+        println!("wp_after={}", e.get_word_pos());
+    }
+'''
+s=s[:i]+probe+s[i:]
+open(p,'w').write(s)
+EOF
+cargo test --lib probe_path -- --nocapture 2>&1 | grep -E "got=|got2=|wp_after|test result"
+got=1688157591 exp=1688157591 eq=true
+got2=1688157591 eq2=true
+wp_after=50
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.00s
+[0m
+My probe was comparing wrong things. Let me probe the actual `Rng` serde roundtrip with details:
+[0m$ [0mpython3 - <<'EOF'
+p='src/core/rng.rs'
+s=open(p).read()
+i=s.rfind('}')
+probe='''
+    #[test]
+    fn probe_rng() {
+        let mut a = Rng::new(42);
+        for _ in 0..24 { a.u64(); }
+        let j = serde_json::to_string(&a).unwrap();
+        println!("rng json={j}");
+        let mut b: Rng = serde_json::from_str(&j).unwrap();
+        let got = b.u64();
+        let mut c = Rng::new(42);
+        for _ in 0..25 { c.u64(); }
+        let exp = c.u64();
+        println!("got={got} exp={exp} eq={}", got == exp);
+        // also: does Rng's ChaCha state serialize same as direct ChaCha?
+        let jc = serde_json::to_string(&a.inner).unwrap();
+        println!("chacha json={jc}");
+        let mut d: rand_chacha::ChaCha8Rng = serde_json::from_str(&jc).unwrap();
+        use rand_core::TryRng as _;
+        let gd = d.try_next_u64().unwrap();
+        println!("gd={gd} eq2={}", gd == exp);
+    }
+'''
+s=s[:i]+probe+s[i:]
+open(p,'w').write(s)
+EOF
+cargo test --lib probe_rng -- --nocapture 2>&1 | grep -E "json=|got=|gd=|test result"
+rng json=[42,{"seed":[164,143,161,123,88,50,61,10,234,184,161,204,105,1,20,184,43,140,200,117,24,180,247,84,141,68,110,161,228,223,32,242],"stream":0,"word_pos":48}]
+got=709353063579077124 exp=4829755133369728407 eq=false
+chacha json={"seed":[164,143,161,123,88,50,61,10,234,184,161,204,105,1,20,184,43,140,200,117,24,180,247,84,141,68,110,161,228,223,32,242],"stream":0,"word_pos":48}
+gd=709353063579077124 eq2=false
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.00s
+[0m
+[0m$ [0mgit checkout src/core/rng.rs 2>/dev/null; git diff --stat
+Cargo.lock  |  1 +
+ Cargo.toml  |  2 +-
+ src/save.rs | 20 ++++++++++++++++++++
+ 3 files changed, 22 insertions(+), 1 deletion(-)
+[0m
+The implementation is correct — my test logic was reversed (I was drawing `expected` from `a` *before* serializing, which advanced the stream). The loaded RNG is correctly continuing. Let me clean up the probes and fix the test:
+[0m→ [0mRead src/core/rng.rs[90m [offset=1, limit=45][0m
+[0m
+[0m← [0mEdit src/core/rng.rs
+Index: /home/anonymous/projects/rougelike/src/core/rng.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/rng.rs
++++ /home/anonymous/projects/rougelike/src/core/rng.rs
+@@ -1,9 +1,11 @@
+ //! Seeded RNG wrapper. All randomness in the game flows through here so
+ //! that a run is fully reproducible from a seed.
+ //!
+-//! The stream is a plain `StdRng` (ChaCha12). Saves only persist the seed;
+-//! the in-memory stream is the source of truth, which keeps saves small.
++//! The stream is ChaCha8. Saves persist the generator's full state (plus
++//! the original seed as plain metadata), so the random stream continues
++//! exactly where it left off after a load instead of replaying the run's
++//! prefix.
+ 
+ use rand::RngExt;
+ use rand_core::{SeedableRng, TryRng};
+ use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+[0m
+[0m← [0mEdit src/core/rng.rs
+Index: /home/anonymous/projects/rougelike/src/core/rng.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/rng.rs
++++ /home/anonymous/projects/rougelike/src/core/rng.rs
+@@ -20,17 +20,19 @@
+ }
+ 
+ impl Serialize for Rng {
+     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+-        s.serialize_u64(self.seed)
++        // Persist the seed (metadata) and the full inner generator state,
++        // so a loaded run continues the same random stream.
++        (self.seed, &self.inner).serialize(s)
+     }
+ }
+ 
+ impl<'de> Deserialize<'de> for Rng {
+     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+         use serde::de::Error;
+-        let seed = u64::deserialize(d).map_err(|e: D::Error| e)?;
+-        Ok(Self::new(seed))
++        let (seed, inner) = <(u64, ChaCha)>::deserialize(d).map_err(|e: D::Error| e)?;
++        Ok(Self { seed, inner })
+     }
+ }
+ 
+ impl Rng {
+
+[0m
+Re-applying the implementation cleanly:
+[0m← [0mEdit src/core/rng.rs
+Index: /home/anonymous/projects/rougelike/src/core/rng.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/rng.rs
++++ /home/anonymous/projects/rougelike/src/core/rng.rs
+@@ -141,5 +141,23 @@
+         for _ in 0..100 {
+             assert_eq!(a.u64(), b.u64());
+         }
+     }
++
++    #[test]
++    fn roundtrip_continues_stream() {
++        let mut a = Rng::new(42);
++        // Advance past the run-start prefix, then round-trip a.
++        let prefix: Vec<u64> = (0..8).map(|_| a.u64()).collect();
++        let json = serde_json::to_string(&a).unwrap();
++
++        let loaded: Rng = serde_json::from_str(&json).unwrap();
++        assert_eq!(loaded.seed, 42, "seed stays available as metadata");
++        let mut b = loaded;
++        // b sits at the same stream position as a, so their next draws
++        // must match, and must not replay the prefix.
++        let after: Vec<u64> = (0..16).map(|_| b.u64()).collect();
++        let expected: Vec<u64> = (0..16).map(|_| a.u64()).collect();
++        assert_eq!(after, expected, "stream must continue where it left off");
++        assert_ne!(after, prefix, "load must not replay the run-start prefix");
++    }
+ }
+
+[0m
+[0m← [0mEdit src/save.rs
+Index: /home/anonymous/projects/rougelike/src/save.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/save.rs
++++ /home/anonymous/projects/rougelike/src/save.rs
+@@ -197,20 +197,23 @@
+ fn save_load_rng_stream_continues() {
+     with_isolated_data_dir("rng_stream", || {
+         let mut game = new_game(11);
+         // Advance the stream past the run-start prefix.
+-        let _prefix: Vec<u64> = (0..8).map(|_| game.rng.u64()).collect();
+-        let expected: Vec<u64> = (0..16).map(|_| game.rng.u64()).collect();
++        let prefix: Vec<u64> = (0..8).map(|_| game.rng.u64()).collect();
+ 
+         autosave(&game);
+         let mut loaded = load_autosave().expect("autosave should load");
+         assert_eq!(loaded.seed, game.seed);
+ 
++        // The loaded rng sits at the same stream position as game's,
++        // so the next draws must match and must not replay the prefix.
+         let after: Vec<u64> = (0..16).map(|_| loaded.rng.u64()).collect();
++        let expected: Vec<u64> = (0..16).map(|_| game.rng.u64()).collect();
+         assert_eq!(
+             after, expected,
+             "post-load draws must continue the stream, not replay the prefix"
+         );
++        assert_ne!(after, prefix);
+     });
+ }
+ 
+ #[test]
+
+[0m
+Same fix needed in the save.rs test:
+[0m$ [0mcargo test 2>&1 | tail -8
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests deepdelve
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[0m
+[0m$ [0mcargo test 2>&1 | grep -E "test result|FAILED|passed" | head
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[0m
+[0m$ [0mcargo check 2>&1 | tail -3 && git diff
+warning: `deepdelve` (bin "deepdelve") generated 1 warning (run `cargo fix --bin "deepdelve" -p deepdelve` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.89s
+diff --git a/Cargo.lock b/Cargo.lock
+index bfed07f..68035dc 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1470,6 +1470,7 @@ checksum = "3e6af7f3e25ded52c41df4e0b1af2d047e45896c2f3281792ed68a1c243daedb"
+ dependencies = [
+  "ppv-lite86",
+  "rand_core 0.10.1",
++ "serde",
+ ]
+ 
+ [[package]]
+diff --git a/Cargo.toml b/Cargo.toml
+index e5ba180..d3a6219 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -14,7 +14,7 @@ rand_core = "0.10"
+ serde_json = "1.0"
+ dirs = "6"
+ thiserror = "2"
+-rand_chacha = "0.10"
++rand_chacha = { version = "0.10", features = ["serde"] }
+ 
+ [dependencies.rodio]
+ version = "0.22"
+diff --git a/src/core/rng.rs b/src/core/rng.rs
+index 8644e26..e9126c3 100644
+--- a/src/core/rng.rs
++++ b/src/core/rng.rs
+@@ -1,8 +1,10 @@
+ //! Seeded RNG wrapper. All randomness in the game flows through here so
+ //! that a run is fully reproducible from a seed.
+ //!
+-//! The stream is a plain `StdRng` (ChaCha12). Saves only persist the seed;
+-//! the in-memory stream is the source of truth, which keeps saves small.
++//! The stream is ChaCha8. Saves persist the generator's full state (plus
++//! the original seed as plain metadata), so the random stream continues
++//! exactly where it left off after a load instead of replaying the run's
++//! prefix.
+ 
+ use rand::RngExt;
+ use rand_core::{SeedableRng, TryRng};
+@@ -19,15 +21,17 @@ pub struct Rng {
+ 
+ impl Serialize for Rng {
+     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+-        s.serialize_u64(self.seed)
++        // Persist the seed (metadata) and the full inner generator state,
++        // so a loaded run continues the same random stream.
++        (self.seed, &self.inner).serialize(s)
+     }
+ }
+ 
+ impl<'de> Deserialize<'de> for Rng {
+     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+         use serde::de::Error;
+-        let seed = u64::deserialize(d).map_err(|e: D::Error| e)?;
+-        Ok(Self::new(seed))
++        let (seed, inner) = <(u64, ChaCha)>::deserialize(d).map_err(|e: D::Error| e)?;
++        Ok(Self { seed, inner })
+     }
+ }
+ 
+@@ -138,4 +142,22 @@ mod tests {
+             assert_eq!(a.u64(), b.u64());
+         }
+     }
++
++    #[test]
++    fn roundtrip_continues_stream() {
++        let mut a = Rng::new(42);
++        // Advance past the run-start prefix, then round-trip a.
++        let prefix: Vec<u64> = (0..8).map(|_| a.u64()).collect();
++        let json = serde_json::to_string(&a).unwrap();
++
++        let loaded: Rng = serde_json::from_str(&json).unwrap();
++        assert_eq!(loaded.seed, 42, "seed stays available as metadata");
++        let mut b = loaded;
++        // b sits at the same stream position as a, so their next draws
++        // must match, and must not replay the prefix.
++        let after: Vec<u64> = (0..16).map(|_| b.u64()).collect();
++        let expected: Vec<u64> = (0..16).map(|_| a.u64()).collect();
++        assert_eq!(after, expected, "stream must continue where it left off");
++        assert_ne!(after, prefix, "load must not replay the run-start prefix");
++    }
+ }
+diff --git a/src/save.rs b/src/save.rs
+index da3f091..1b957bb 100644
+--- a/src/save.rs
++++ b/src/save.rs
+@@ -193,6 +193,29 @@ mod tests {
+         });
+     }
+ 
++    #[test]
++    fn save_load_rng_stream_continues() {
++        with_isolated_data_dir("rng_stream", || {
++            let mut game = new_game(11);
++            // Advance the stream past the run-start prefix.
++            let prefix: Vec<u64> = (0..8).map(|_| game.rng.u64()).collect();
++
++            autosave(&game);
++            let mut loaded = load_autosave().expect("autosave should load");
++            assert_eq!(loaded.seed, game.seed);
++
++            // The loaded rng sits at the same stream position as game's,
++            // so the next draws must match and must not replay the prefix.
++            let after: Vec<u64> = (0..16).map(|_| loaded.rng.u64()).collect();
++            let expected: Vec<u64> = (0..16).map(|_| game.rng.u64()).collect();
++            assert_eq!(
++                after, expected,
++                "post-load draws must continue the stream, not replay the prefix"
++            );
++            assert_ne!(after, prefix);
++        });
++    }
++
+     #[test]
+     fn death_turn_leaves_no_autosave() {
+         with_isolated_data_dir("death_turn", || {
+[0m
+[0m→ [0mRead docs/agents/issue-tracker.md
+All 25 tests pass. Let me verify with `cargo check`, review the diff, and check the issue-tracker conventions:
+[0m
+[0m$ [0mcargo check 2>&1 | grep -B2 -A6 "^warning" | head -20
+warning: unused import: `crate::map::fov`
+  --> src/core/game.rs:13:5
+   |
+13 | use crate::map::fov;
+   |     ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `LevelTheme`
+  --> src/core/game.rs:15:32
+   |
+15 | use crate::map::level::{Level, LevelTheme};
+   |                                ^^^^^^^^^^
+
+warning: unused import: `Quest`
+  --> src/core/game.rs:16:20
+   |
+16 | use crate::quest::{Quest, QuestLog};
+   |                    ^^^^^
+[0m
+Let me confirm the bin warning is pre-existing and not from my change:
+[0m$ [0mgit log --oneline -8 && git status --short
+367ec2c fix 3
+b146185 update readme
+e6c2a94 Address code review: dedup save test setup, fix harness comment (issue 02)
+142523a fix + update
+850384f Address code review: tidy hiscore tests, add done label
+920b1c8 Fix hiscore double-record on run end (issue 01)
+90052af Baseline: deepdelve roguelike before hiscore fix
+ M Cargo.lock
+ M Cargo.toml
+ M src/core/rng.rs
+ M src/save.rs
+?? .opencode/
+?? .scratch/implement-all.log
+?? scripts/
+[0m
+All warnings are pre-existing. Now let me check commit style and commit:
+[0m$ [0mgit add Cargo.toml Cargo.lock src/core/rng.rs src/save.rs && git commit -m "Fix RNG stream resetting on save/load (issue 04)
+
+Persist the inner ChaCha8Rng state (plus the seed as metadata) instead
+of only the seed, so the random stream continues exactly where it left
+off after loading a save. Enable rand_chacha's serde feature."
+[master 5e08b8f] Fix RNG stream resetting on save/load (issue 04)
+ 4 files changed, 52 insertions(+), 6 deletions(-)
+[0m
+Done. Committed as `5e08b8f` — all 25 tests pass, `cargo check` clean.
+
+Changes:
+- `src/core/rng.rs:20-36` — `Rng` now serializes the seed **and** the full inner `ChaCha8Rng` state (via `rand_chacha`'s `serde` feature: seed/stream/word_pos), instead of only the seed; deserialization restores the exact stream position. `Rng::new(seed)` unchanged for new games.
+- `Cargo.toml` — `rand_chacha = { version = "0.10", features = ["serde"] }`.
+- Tests: `roundtrip_continues_stream` (rng.rs) and `save_load_rng_stream_continues` (save.rs) verify post-load draws continue the stream and don't replay the run-start prefix.
+
+Note: save files from before this fix (seed-only) no longer parse — `load_autosave` will reject them gracefully, which is inherent to the format change.
+[04] COMMITTED: 5e08b8f Fix RNG stream resetting on save/load (issue 04)
+[04] END 16:15:07
+[05] START 16:15:07
+[0m
+> build · Qwen3.8-27B-IQ3_XXS
+[0m
+[0m→ [0mRead .scratch/deepdelve/issues/05-spawn-monster-no-variety.md
+[0m✱ [0mGrep "spawn_monster"[90m 9 matches[0m
+[0m✱ [0mGrep "fn pick"[90m 4 matches[0m
+[0m→ [0mRead src/entities/monster.rs
+[0m→ [0mRead src/core/rng.rs
+[0m→ [0mRead src/data/monsters.rs
+[0m
+[0m← [0mEdit src/entities/monster.rs
+Index: /home/anonymous/projects/rougelike/src/entities/monster.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/entities/monster.rs
++++ /home/anonymous/projects/rougelike/src/entities/monster.rs
+@@ -106,13 +106,12 @@
+ let defs: Vec<&MonsterDef> = crate::data::monsters::MONSTERS
+     .iter()
+     .filter(|d| d.tier == tier)
+     .collect();
+-let def = defs
+-    .first()
+-    .copied()
+-    .unwrap_or(&crate::data::monsters::MONSTERS[0])
+-    .clone();
++let def = match rng.pick(&defs) {
++    Some(d) => d.clone(),
++    None => crate::data::monsters::MONSTERS[0].clone(),
++};
+ let mut m = Monster::new(def, (3, 3));
+ if endless && depth > 25 {
+     // Scale up.
+     m.max_hp = (m.max_hp as u16 + (depth - 25) as u16 * 5) as u8;
+
+[0m
+The issue is clear: `spawn_monster` at src/entities/monster.rs:110 takes `.first()` of the tier's defs instead of picking randomly. Fixing now:
+[0m← [0mEdit src/entities/monster.rs
+Index: /home/anonymous/projects/rougelike/src/entities/monster.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/entities/monster.rs
++++ /home/anonymous/projects/rougelike/src/entities/monster.rs
+@@ -145,8 +145,33 @@
+     m
+ }
+ 
+ #[test]
++fn spawn_picks_varied_species_within_tier() {
++    let mut rng = Rng::new(12345);
++    let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
++    for _ in 0..100 {
++        let m = spawn_monster(&mut rng, 1, false);
++        assert_eq!(m.def.tier, 1);
++        names.insert(m.def.name.clone());
++    }
++    assert!(
++        names.len() > 1,
++        "tier 1 spawns should include multiple species, got {names:?}"
++    );
++}
++
++#[test]
++fn spawn_falls_back_when_tier_has_no_defs() {
++    // No real depth maps to a tier without defs, so verify the pick
++    // path only changes species choice, and that an empty tier list
++    // is handled via the fallback (no panic, valid monster).
++    let mut rng = Rng::new(7);
++    let m = spawn_monster(&mut rng, 3, false);
++    assert_eq!(m.def.tier, 1);
++}
++
++#[test]
+ fn monster_survives_json_roundtrip() {
+     let m = sample();
+     let json = serde_json::to_string(&m).unwrap();
+     let back: Monster = serde_json::from_str(&json).unwrap();
+
+[0m
+Now add a regression test:
+[0m← [0mEdit src/entities/monster.rs
+Index: /home/anonymous/projects/rougelike/src/entities/monster.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/entities/monster.rs
++++ /home/anonymous/projects/rougelike/src/entities/monster.rs
+@@ -160,15 +160,16 @@
+     );
+ }
+ 
+ #[test]
+-fn spawn_falls_back_when_tier_has_no_defs() {
+-    // No real depth maps to a tier without defs, so verify the pick
+-    // path only changes species choice, and that an empty tier list
+-    // is handled via the fallback (no panic, valid monster).
++fn spawn_keeps_tier_correct() {
+     let mut rng = Rng::new(7);
+-    let m = spawn_monster(&mut rng, 3, false);
+-    assert_eq!(m.def.tier, 1);
++    for depth in [1u8, 7, 12, 17, 22, 40] {
++        for _ in 0..20 {
++            let m = spawn_monster(&mut rng, depth, false);
++            assert_eq!(m.def.tier, tier_for_depth(depth));
++        }
++    }
+ }
+ 
+ #[test]
+ fn monster_survives_json_roundtrip() {
+
+[0m
+The second test is weak and misleading — let me remove it and keep only the meaningful variety test:
+[0m$ [0mcargo test 2>&1 | tail -40
+(no output)
+
+<shell_metadata>
+shell tool terminated command after exceeding timeout 120000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.
+</shell_metadata>
+[0m
+The test run timed out (likely first-build compilation). Let me check compilation separately with a longer timeout:
+[0m$ [0mcargo check --tests 2>&1 | tail -20
+|                                                     ^^^ help: if this is intentional, prefix it with an underscore: `_rng`
+
+warning: unused variable: `rarity`
+  --> src/items/loot.rs:34:44
+   |
+34 | pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+warning: `deepdelve` (lib) generated 15 warnings (run `cargo fix --lib -p deepdelve` to apply 13 suggestions)
+warning: unused import: `deepdelve::core::game::Game`
+ --> src/main.rs:7:5
+  |
+7 | use deepdelve::core::game::Game;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `deepdelve` (bin "deepdelve" test) generated 1 warning (run `cargo fix --bin "deepdelve" -p deepdelve --tests` to apply 1 suggestion)
+warning: `deepdelve` (lib test) generated 15 warnings (15 duplicates)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.82s
+[0m
+Compiles. Now run the tests (build is cached):
+[0m$ [0mcargo test 2>&1 | tail -30
+(no output)
+
+<shell_metadata>
+shell tool terminated command after exceeding timeout 300000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.
+</shell_metadata>
+[0m
+`cargo test` hangs even with cached build — a test may block. Let me isolate:
+[0m$ [0mcargo test --lib spawn 2>&1 | tail -20
+|
+37 |     pub fn new(name: &str, race: &str, class: &str, rng: &mut Rng) -> Self {
+   |                                                     ^^^ help: if this is intentional, prefix it with an underscore: `_rng`
+
+warning: unused variable: `rarity`
+  --> src/items/loot.rs:34:44
+   |
+34 | pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+warning: `deepdelve` (lib test) generated 15 warnings (run `cargo fix --lib -p deepdelve --tests` to apply 13 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (target/debug/deps/deepdelve-e4ffa7eff43b4247)
+
+running 2 tests
+test entities::monster::tests::spawn_keeps_tier_correct ... ok
+test entities::monster::tests::spawn_picks_varied_species_within_tier ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.00s
+[0m
+New tests pass. Let me find which test hangs:
+[0m$ [0mcargo test --lib 2>&1 | tail -40
+(no output)
+
+<shell_metadata>
+shell tool terminated command after exceeding timeout 180000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.
+</shell_metadata>
+[0m
+[0m$ [0mcargo test --lib -- --list 2>&1 | tail -35
+34 | pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+warning: `deepdelve` (lib test) generated 15 warnings (run `cargo fix --lib -p deepdelve --tests` to apply 13 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (target/debug/deps/deepdelve-e4ffa7eff43b4247)
+audio::synth::tests::noise_range: test
+audio::synth::tests::sine_shape: test
+combat::tests::player_can_hit: test
+core::message::tests::caps_at_max: test
+core::message::tests::tail_order: test
+core::rng::tests::deterministic: test
+core::rng::tests::roundtrip_continues_stream: test
+entities::monster::tests::monster_survives_json_roundtrip: test
+entities::monster::tests::spawn_keeps_tier_correct: test
+entities::monster::tests::spawn_picks_varied_species_within_tier: test
+hiscore::tests::death_and_victory_same_turn_record_once: test
+hiscore::tests::death_records_exactly_one_entry: test
+hiscore::tests::in_progress_run_records_nothing: test
+hiscore::tests::victory_records_exactly_one_entry: test
+map::fov::tests::sees_own_tile: test
+map::fov::tests::wall_blocks: test
+map::path::tests::straight_path: test
+map::path::tests::unreachable: test
+save::tests::dead_game_autosave_writes_nothing: test
+save::tests::death_turn_leaves_no_autosave: test
+save::tests::load_rejects_dead_autosave_on_disk: test
+save::tests::load_rejects_won_autosave_on_disk: test
+save::tests::mid_run_autosave_writes_loadable_save: test
+save::tests::save_load_preserves_monsters: test
+save::tests::save_load_rng_stream_continues: test
+save::tests::victory_turn_leaves_no_autosave: test
+save::tests::won_game_autosave_writes_nothing: test
+
+27 tests, 0 benchmarks
+[0m
+[0m$ [0mcargo test --lib 'audio|combat|core::message|core::rng' 2>&1 | tail -12
+|
+34 | pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+warning: `deepdelve` (lib test) generated 15 warnings (run `cargo fix --lib -p deepdelve --tests` to apply 13 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (target/debug/deps/deepdelve-e4ffa7eff43b4247)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+[0m
+One of the other tests hangs. Bisecting by module:
+[0m$ [0mcargo test --lib hiscore 2>&1 | tail -10
+(no output)
+
+<shell_metadata>
+shell tool terminated command after exceeding timeout 90000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.
+</shell_metadata>
+[0m
+The hiscore tests hang. Testing each individually:
+[0m$ [0mcargo test --lib -- exact hiscore::tests::death_and_victory_same_turn_record_once --exact 2>&1 | tail -6; echo "---"; cargo test --lib hiscore::tests::death_records_exactly_one_entry --exact 2>&1 | tail -6
+(no output)
+
+<shell_metadata>
+shell tool terminated command after exceeding timeout 90000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.
+</shell_metadata>
+[0m
+[0m$ [0mtimeout 60 cargo test --lib -- hiscore::tests::death_records_exactly_one_entry --exact 2>&1 | tail -8
+34 | pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+   |                                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_rarity`
+
+warning: `deepdelve` (lib test) generated 15 warnings (run `cargo fix --lib -p deepdelve --tests` to apply 13 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (target/debug/deps/deepdelve-e4ffa7eff43b4247)
+
+running 1 test
+[0m
+That hiscore test hangs. I need to check whether it's caused by my change (RNG stream shift) or pre-existing:
+[0m$ [0mgit -C /home/anonymous/projects/rougelike stash && timeout 60 cargo test --lib -- hiscore::tests::death_records_exactly_one_entry --exact 2>&1 | tail -8; git -C /home/anonymous/projects/rougelike stash pop
+Saved working directory and index state WIP on master: 5e08b8f Fix RNG stream resetting on save/load (issue 04)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+     Running unittests src/lib.rs (target/debug/deps/deepdelve-e4ffa7eff43b4247)
+
+running 1 test
+test hiscore::tests::death_records_exactly_one_entry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.00s
+
+On branch master
+Your branch is ahead of 'origin/master' by 1 commit.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   src/entities/monster.rs
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.opencode/
+	.scratch/implement-all.log
+	scripts/
+
+no changes added to commit (use "git add" and/or "git commit -a")
+Dropped refs/stash@{0} (e21c82366ab9db1b4ea2912f4664df40bff947eb)
+[0m
+[0m✱ [0mGlob "src/**/hiscore*.rs"[90m 1 match[0m
+My change causes the hang — the RNG stream shift alters game simulation. Let me examine the hiscore tests:
+[0m→ [0mRead src/hiscore.rs
+[0m✱ [0mGrep "pub fn new_game|pub fn with_isolated_data_dir"[90m 2 matches[0m
+[0m→ [0mRead src/lib.rs
+[0m
+[0m$ [0mgrep -n "do_turn\|Action::Wait\|fn new_test" src/core/game.rs | head -30
+107:    pub fn new_test(name: &str, race: &str, class: &str, seed: u64) -> Self {
+182:    pub fn do_turn(&mut self, action: crate::core::action::Action) {
+200:            crate::core::action::Action::Wait => {}
+[0m
+[0m→ [0mRead src/core/game.rs[90m [offset=100, limit=180][0m
+[0m
+[0m$ [0mgrep -n "random_floor_tile" -r src/ | head; grep -n "fn random_floor_tile" -A 30 src/map/gen.rs
+src/map/gen/mod.rs:283:pub fn random_floor_tile(game: &crate::core::game::Game, depth: u8, rng: &mut Rng) -> Option<(u8, u8)> {
+src/core/game.rs:147:            if let Some(p) = crate::map::gen::random_floor_tile(self, depth, &mut self.rng.clone()) {
+src/core/game.rs:706:        if let Some(p) = crate::map::gen::random_floor_tile(
+grep: src/map/gen.rs: No such file or directory
+[0m
+The `populate_monsters` loop (lines 146-159) can spin forever if positions keep colliding. Let me check `random_floor_tile`:
+[0m→ [0mRead src/map/gen/mod.rs[90m [offset=270, limit=60][0m
+[0m→ [0mRead src/core/game.rs[90m [offset=690, limit=40][0m
+Found it. The root cause of the hang: in `populate_monsters` (src/core/game.rs:147), `random_floor_tile` is called with `&mut self.rng.clone()` — each call freshly clones the RNG, so unless the shared stream advances, it always proposes the same tile. If the proposed tile happens to be the player's position, nothing gets placed, the stream never advances, and the `while placed < n` loop spins forever. My change to `spawn_monster` shifted the stream by one draw (the species `pick`), and with seed 42 it now lands on a player position collision. The existing `max = n + 4` was intended as the cap on the number of attempts, but it's incorrectly applied to `placed` (which is always `< max`), so it doesn't bound the loop.
+
+Let's check the other call site on line 706:
+[0m
+[0m← [0mEdit src/core/game.rs
+Index: /home/anonymous/projects/rougelike/src/core/game.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/game.rs
++++ /home/anonymous/projects/rougelike/src/core/game.rs
+@@ -141,10 +141,12 @@
+ 
+ fn populate_monsters(&mut self, depth: u8) {
+     let n = self.rng.int(3..8) as usize;
+     let mut placed = 0;
+-    let max = n + 4;
+-    while placed < n && placed < max {
++    let mut attempts = 0;
++    let max_attempts = n + 4;
++    while placed < n && attempts < max_attempts {
++        attempts += 1;
+         if let Some(p) = crate::map::gen::random_floor_tile(self, depth, &mut self.rng.clone()) {
+             if p != self.player.pos {
+                 let mut m = crate::entities::monster::spawn_monster(
+                     &mut self.rng,
+
+[0m
+`maybe_spawn` is a one-shot, no hang risk. The hang is in the `populate_monsters` loop. Fixing it with the intended attempt cap (the existing `max = n + 4` was meant to bound iterations but was misapplied to `placed`):
+Now let me verify the type of my `spawn_monster` change is correct and rebuild. The concern: `pick` returns `Option<&MonsterDef>`, so `d.clone()` must yield a `MonsterDef` (by value) to match `Monster::new(def: MonsterDef, ...)` and the `None` arm. It compiled and my two tests passed, so the types unify. Let me run the full suite now:
+[0m$ [0mcargo test 2>&1 | tail -45
+Running unittests src/lib.rs (target/debug/deps/deepdelve-e4ffa7eff43b4247)
+
+running 27 tests
+test audio::synth::tests::sine_shape ... ok
+test combat::tests::player_can_hit ... ok
+test core::message::tests::tail_order ... ok
+test core::message::tests::caps_at_max ... ok
+test audio::synth::tests::noise_range ... ok
+test core::rng::tests::roundtrip_continues_stream ... ok
+test entities::monster::tests::monster_survives_json_roundtrip ... ok
+test core::rng::tests::deterministic ... ok
+test map::fov::tests::sees_own_tile ... ok
+test map::fov::tests::wall_blocks ... ok
+test entities::monster::tests::spawn_keeps_tier_correct ... ok
+test entities::monster::tests::spawn_picks_varied_species_within_tier ... ok
+test map::path::tests::unreachable ... ok
+test map::path::tests::straight_path ... ok
+test hiscore::tests::death_and_victory_same_turn_record_once ... ok
+test hiscore::tests::death_records_exactly_one_entry ... ok
+test hiscore::tests::victory_records_exactly_one_entry ... ok
+test hiscore::tests::in_progress_run_records_nothing ... ok
+test save::tests::dead_game_autosave_writes_nothing ... ok
+test save::tests::death_turn_leaves_no_autosave ... ok
+test save::tests::load_rejects_dead_autosave_on_disk ... ok
+test save::tests::load_rejects_won_autosave_on_disk ... ok
+test save::tests::mid_run_autosave_writes_loadable_save ... ok
+test save::tests::save_load_preserves_monsters ... ok
+test save::tests::save_load_rng_stream_continues ... ok
+test save::tests::victory_turn_leaves_no_autosave ... ok
+test save::tests::won_game_autosave_writes_nothing ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/main.rs (target/debug/deps/deepdelve-55d92906cdf8662b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests deepdelve
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[0m
+[0m$ [0mgit status --short && git diff
+M src/core/game.rs
+ M src/entities/monster.rs
+?? .opencode/
+?? .scratch/implement-all.log
+?? scripts/
+diff --git a/src/core/game.rs b/src/core/game.rs
+index 3c3271a..85c84b3 100644
+--- a/src/core/game.rs
++++ b/src/core/game.rs
+@@ -142,8 +142,10 @@ impl Game {
+     fn populate_monsters(&mut self, depth: u8) {
+         let n = self.rng.int(3..8) as usize;
+         let mut placed = 0;
+-        let max = n + 4;
+-        while placed < n && placed < max {
++        let mut attempts = 0;
++        let max_attempts = n + 4;
++        while placed < n && attempts < max_attempts {
++            attempts += 1;
+             if let Some(p) = crate::map::gen::random_floor_tile(self, depth, &mut self.rng.clone()) {
+                 if p != self.player.pos {
+                     let mut m = crate::entities::monster::spawn_monster(
+diff --git a/src/entities/monster.rs b/src/entities/monster.rs
+index 72a8b0c..61dacc0 100644
+--- a/src/entities/monster.rs
++++ b/src/entities/monster.rs
+@@ -107,11 +107,10 @@ pub fn spawn_monster(rng: &mut Rng, depth: u8, endless: bool) -> Monster {
+         .iter()
+         .filter(|d| d.tier == tier)
+         .collect();
+-    let def = defs
+-        .first()
+-        .copied()
+-        .unwrap_or(&crate::data::monsters::MONSTERS[0])
+-        .clone();
++    let def = match rng.pick(&defs) {
++        Some(d) => d.clone(),
++        None => crate::data::monsters::MONSTERS[0].clone(),
++    };
+     let mut m = Monster::new(def, (3, 3));
+     if endless && depth > 25 {
+         // Scale up.
+@@ -146,6 +145,32 @@ mod tests {
+         m
+     }
+ 
++    #[test]
++    fn spawn_picks_varied_species_within_tier() {
++        let mut rng = Rng::new(12345);
++        let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
++        for _ in 0..100 {
++            let m = spawn_monster(&mut rng, 1, false);
++            assert_eq!(m.def.tier, 1);
++            names.insert(m.def.name.clone());
++        }
++        assert!(
++            names.len() > 1,
++            "tier 1 spawns should include multiple species, got {names:?}"
++        );
++    }
++
++    #[test]
++    fn spawn_keeps_tier_correct() {
++        let mut rng = Rng::new(7);
++        for depth in [1u8, 7, 12, 17, 22, 40] {
++            for _ in 0..20 {
++                let m = spawn_monster(&mut rng, depth, false);
++                assert_eq!(m.def.tier, tier_for_depth(depth));
++            }
++        }
++    }
++
+     #[test]
+     fn monster_survives_json_roundtrip() {
+         let m = sample();
+[0m
+All 27 tests pass. Reviewing the final diff before committing:
+[0m$ [0mgit log --oneline -5
+5e08b8f Fix RNG stream resetting on save/load (issue 04)
+367ec2c fix 3
+b146185 update readme
+e6c2a94 Address code review: dedup save test setup, fix harness comment (issue 02)
+142523a fix + update
+[0m
+Diff is clean. Checking commit message style, then committing only the two source files:
+[0m$ [0mgit add src/entities/monster.rs src/core/game.rs && git commit -m "Randomize monster species within tier (issue 05)
+
+spawn_monster now uses rng.pick over the tier's defs instead of always
+taking the first, with fallback to the first def when the tier list is
+empty. The stream shift exposed a latent infinite loop in
+populate_monsters (its unbounded while could spin on a tile that keeps
+colliding with the player pos, since the cloned RNG never advances on
+failed placement); the existing n+4 cap is now applied to attempts
+instead of placed, which does not change the success path." && git log --oneline -1
+[master d6d8497] Randomize monster species within tier (issue 05)
+ 2 files changed, 34 insertions(+), 7 deletions(-)
+d6d8497 Randomize monster species within tier (issue 05)
+[0m
+Done. Committed as `d6d8497`. Summary:
+
+**Issue 05 fix** (`src/entities/monster.rs:110`): `spawn_monster` now uses `rng.pick(&defs)` over the tier's defs, falling back to `MONSTERS[0]` only when the tier list is empty. Added two tests: species variety within a tier (100 spawns at tier 1 yield >1 species) and tier correctness across all depths.
+
+**Latent bug exposed by the fix**: the stream shift made seed-42 hiscore tests hang. Root cause in `populate_monsters` (src/core/game.rs:142): the loop passed a fresh `self.rng.clone()` to `random_floor_tile` each iteration, so a proposed tile colliding with the player position never advanced the RNG — the unbounded `while placed < n` spun forever. The pre-existing `max = n + 4` was meant as an attempt cap but was misapplied to `placed` (always true). Fixed it to cap actual attempts; the success path is unchanged (still exactly `n` iterations).
+
+All 27 tests pass.
+[05] COMMITTED: d6d8497 Randomize monster species within tier (issue 05)
+[05] END 16:44:28
+[06] START 16:44:28
+[0m
+> build · Qwen3.8-27B-IQ3_XXS
+[0m
+[0m→ [0mRead .scratch/deepdelve/issues/06-weapon-no-damage.md
+[0m→ [0mRead AGENTS.md
+I'll start by reading the issue file and understanding the project structure.
+[0m✱ [0mGlob "src/**/*.rs"[90m 45 matches[0m
+[0m✱ [0mGrep "player_attacks"[90m 6 matches[0m
+[0m✱ [0mGrep "damage_die"[90m 59 matches[0m
+Now let me explore the codebase to understand the combat module, weapon type, and damage roll conventions.
+[0m→ [0mRead src/combat.rs
+[0m→ [0mRead src/entities/player.rs
+[0m→ [0mRead src/items/item.rs
+Let me read the combat module and related files.
+[0m→ [0mRead src/items/catalog.rs
+[0m→ [0mRead src/items/equip.rs
+[0m→ [0mRead src/core/rng.rs
+The `Item` struct has `enchant` and `defense` but I don't see a weapon damage die field. Let me check the catalog and equip modules to understand how weapons are defined.
+[0m✱ [0mGrep "damage|damage_die|dmg"[90m in src/items · 0 matches[0m
+[0m✱ [0mGrep "defense"[90m 18 matches[0m
+[0m✱ [0mGlob ".scratch/deepdelve/issues/*.md"[90m 0 matches[0m
+The brief claims the weapon item type already has a "damage die + enchant" fields, but the `Item` struct only has `enchant` and `defense` — no damage die. Let me verify this discrepancy across the codebase before deciding.
+[0m
+[0m$ [0mls -la /home/anonymous/projects/rougelike/.scratch/deepdelve/ 2>&1; echo "---issues---"; ls -la /home/anonymous/projects/rougelike/.scratch/deepdelve/issues/ 2>&1
+total 12
+drwxrwxr-x 3 anonymous anonymous 4096 Aug 20 12:28 .
+drwxrwxr-x 3 anonymous anonymous 4096 Aug 20 15:42 ..
+drwxrwxr-x 2 anonymous anonymous 4096 Aug 20 12:41 issues
+---issues---
+total 104
+drwxrwxr-x 2 anonymous anonymous 4096 Aug 20 12:41 .
+drwxrwxr-x 3 anonymous anonymous 4096 Aug 20 12:28 ..
+-rw-rw-r-- 1 anonymous anonymous 2085 Aug 20 13:40 01-hiscore-double-record.md
+-rw-rw-r-- 1 anonymous anonymous 2132 Aug 20 14:22 02-dead-autosave.md
+-rw-rw-r-- 1 anonymous anonymous 2115 Aug 20 15:05 03-monster-deserialize-stub.md
+-rw-rw-r-- 1 anonymous anonymous 1576 Aug 20 12:30 04-rng-resets-on-load.md
+-rw-rw-r-- 1 anonymous anonymous 1373 Aug 20 12:30 05-spawn-monster-no-variety.md
+-rw-rw-r-- 1 anonymous anonymous 1801 Aug 20 12:30 06-weapon-no-damage.md
+-rw-rw-r-- 1 anonymous anonymous 1445 Aug 20 12:31 07-never-levels-up.md
+-rw-rw-r-- 1 anonymous anonymous 1816 Aug 20 12:32 08-take-off-ignores-slot.md
+-rw-rw-r-- 1 anonymous anonymous 1652 Aug 20 12:32 09-a-star-heap-inverted.md
+-rw-rw-r-- 1 anonymous anonymous 1768 Aug 20 12:33 10-death-cause-hardcoded.md
+-rw-rw-r-- 1 anonymous anonymous 2153 Aug 20 12:33 11-scrolls-potions-noop.md
+-rw-rw-r-- 1 anonymous anonymous 1844 Aug 20 12:34 12-dead-code-warnings.md
+-rw-rw-r-- 1 anonymous anonymous 2424 Aug 20 12:35 13-item-actions-unreachable.md
+-rw-rw-r-- 1 anonymous anonymous 1712 Aug 20 12:35 14-wand-targeting-unreachable.md
+-rw-rw-r-- 1 anonymous anonymous 1895 Aug 20 12:36 15-quests-never-progress.md
+-rw-rw-r-- 1 anonymous anonymous 1329 Aug 20 12:36 16-shop-dead-code.md
+-rw-rw-r-- 1 anonymous anonymous 1969 Aug 20 12:36 17-audio-dead-code.md
+-rw-rw-r-- 1 anonymous anonymous 2564 Aug 20 12:37 18-statuses-no-effect.md
+-rw-rw-r-- 1 anonymous anonymous 1527 Aug 20 12:38 19-monster-ai-gaps.md
+-rw-rw-r-- 1 anonymous anonymous 2489 Aug 20 12:38 20-map-features-missing.md
+-rw-rw-r-- 1 anonymous anonymous 2079 Aug 20 12:39 21-endless-mode-unimplemented.md
+-rw-rw-r-- 1 anonymous anonymous 2347 Aug 20 12:40 22-main-rs-infra-gaps.md
+-rw-rw-r-- 1 anonymous anonymous 2191 Aug 20 12:40 23-no-integration-tests-ci.md
+-rw-rw-r-- 1 anonymous anonymous 1845 Aug 20 12:41 24-no-starting-kit.md
+[0m
+[0m✱ [0mGrep "def\."[90m in src/entities/monster.rs · 8 matches[0m
+[0m→ [0mRead src/entities/monster.rs[90m [limit=80][0m
+[0m✱ [0mGrep "defense|enchant|damage"[90m in src/ui · 0 matches[0m
+Let me look at how weapons display their `defense` value in the UI, and check the monster def structure, to understand the intended weapon "damage" semantics.
+[0m✱ [0mGrep "die|damage|dmg"[90m in src · 77 matches[0m
+[0m✱ [0mGrep "wielded|wield"[90m 11 matches[0m
+[0m→ [0mRead src/core/game.rs[90m [offset=260, limit=40][0m
+The brief's premise that the weapon's "damage die" field already exists is contradicted by the code — `Item` has no damage-die field. Let me confirm a few things before deciding whether to implement or stop.
+[0m→ [0mRead src/shop.rs[90m [limit=30][0m
+[0m→ [0mRead src/ui/panels.rs[90m [limit=70][0m
+[0m→ [0mRead src/save.rs[90m [limit=40][0m
+I have enough to assess this, but let me confirm how the weapon's `defense` value is presented to the player (shop/panel display) to gauge whether it's intended as a weapon-damage stat.
+I stopped before making changes — this one has a real ambiguity that the brief papers over, so I want your call before committing.
+
+## What I found
+
+The bug is confirmed: `src/combat.rs:33` in `player_attacks` rolls `m.def.damage_die` (the **monster's** die) instead of the player's weapon.
+
+But the brief's core premise is wrong. Under **Key interfaces** it says the weapon "damage die + enchant fields **already exist**." They don't. The weapon `Item` (`src/items/item.rs:117-126`) has only `enchant: i8` and a shared `defense: u8` — **no damage-die field anywhere** (verified across `src/`). The only weapon-damage-ish number is `defense`, which the catalog populates with flat 1–5 ratings (`catalog.rs:8-21`) and which is *also* the armor AC that `Player::ac()` reads (`player.rs:137`). No weapon in the catalog reaches a "d6" — max is 5.
+
+So implementing "wielded weapon contributes its damage die" forces a decision the brief assumed was already made:
+
+## The fork
+
+- **Option A — reuse the shared `defense` field as the weapon die.** Minimal: change is confined to `player_attacks`, no save-format or catalog changes. A "+0 d6 weapon" = `Item { defense: 6, enchant: 0, .. }`. Smell: one field doubles as armor AC *and* weapon damage.
+- **Option B — add a dedicated `damage_die` field to `Item`.** Cleaner, but contradicts the brief's "already exists," requires catalog changes, and needs `#[serde(default)]` because `Item` is serialized into the save file (`save.rs`) and existing saves lack the field.
+
+## My recommendation
+
+**Option A** (matches the brief's "already exists" claim and its scope-to-combat-module intent). Concretely, in `player_attacks` (`src/combat.rs:33`):
+
+```rust
+let (die, enchant) = match p.wielded.as_ref() {
+    Some(w) => (w.defense as u64, w.enchant),
+    None => (4, 0), // unarmed: 1d4, no enchant
+};
+// roll die (exclusive upper bound, same convention as monster side),
+// add enchant as flat bonus (signed — enchant can be negative),
+// then existing crit + AC/2 subtraction, floored at 0.
+```
+
+Two assumptions I'd be baking in, both from the brief's note ("keep the convention consistent"):
+1. "1d4"/"d6" follow the existing off-by-one die convention (`int(1..die)`, so "d4"→3 sides), same as the monster side.
+2. The "d6 weapon" acceptance criterion is only satisfiable by hand-constructing an item, since no catalog weapon has a 6.
+
+**Nothing committed, no files changed.** Tell me **A** (I'll implement, add tests, run `cargo test`, commit) or **B**, or if you'd rather the die convention be true N-sided rather than matching the monster's off-by-one.
+[06] WARNING: no new commit (agent may have skipped or work needs review)
+[06] END 16:59:18
+[07] START 16:59:18
+[0m
+> build · Qwen3.8-27B-IQ3_XXS
+[0m
+[0m→ [0mRead .scratch/deepdelve/issues/07-never-levels-up.md
+[0m→ [0mRead AGENTS.md
+[0m✱ [0mGrep "gain_xp|kill_monster"[90m in . · 3 matches[0m
+[0m→ [0mRead src/core/game.rs[90m [offset=280, limit=60][0m
+[0m→ [0mRead src/entities/player.rs[90m [offset=130, limit=60][0m
+[0m→ [0mRead src/core/message.rs
+[0m✱ [0mGrep "LevelUp"[90m in . · 3 matches[0m
+[0m→ [0mRead src/core/events.rs
+[0m✱ [0mGrep "fn emit|LevelUp"[90m in src · 4 matches[0m
+[0m→ [0mRead src/core/game.rs[90m [limit=30, offset=165][0m
+[0m→ [0mRead src/core/game.rs[90m [offset=339, limit=40][0m
+[0m→ [0mRead src/core/game.rs[90m [offset=600, limit=200][0m
+[0m✱ [0mGrep "kill_monster|gain_xp|xp"[90m in src · 0 matches[0m
+[0m
+[0m$ [0mls src tests 2>/dev/null; grep -rn "mod tests" src/core/game.rs src/entities/player.rs
+src:
+audio
+combat.rs
+core
+data
+entities
+hiscore.rs
+items
+lib.rs
+magic.rs
+main.rs
+map
+quest.rs
+save.rs
+shop.rs
+status.rs
+ui
+[0m
+[0m→ [0mRead src/entities/player.rs[90m [limit=130][0m
+[0m→ [0mRead src/core/game.rs[90m [limit=165][0m
+[0m✱ [0mGrep "#\[test\]|#\[cfg\(test\)\]"[90m in src · 37 matches[0m
+[0m→ [0mRead src/entities/monster.rs
+[0m→ [0mRead src/data/monsters.rs[90m [limit=60][0m
+Now I'll look at the monster data to build a test monster, then make the fix.
+[0m
+[0m← [0mEdit src/core/game.rs
+Index: /home/anonymous/projects/rougelike/src/core/game.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/game.rs
++++ /home/anonymous/projects/rougelike/src/core/game.rs
+@@ -323,13 +323,20 @@
+ let tier = m.tier();
+ let name = m.name.clone();
+ self.player.kills += 1;
+ let xp = m.xp;
+-self.player.xp += xp;
++let leveled_up = self.player.gain_xp(xp);
+ self.log(
+     crate::core::message::MessageKind::Good,
+     format!("{name} is {how} (+{xp} XP)"),
+ );
++if leveled_up {
++    self.log(
++        crate::core::message::MessageKind::Good,
++        format!("You are now level {}!", self.player.level),
++    );
++    self.emit(GameEvent::LevelUp);
++}
+ self.emit(GameEvent::MonsterDeath { tier });
+ if crate::items::loot::maybe_drop(&mut self.rng, tier) {
+     let drop = crate::items::loot::roll_drop(
+         &mut self.rng,
+
+[0m
+Now I'll apply the fix to `kill_monster`:
+[0m✱ [0mGrep "new_test"[90m in src · 2 matches[0m
+Now add tests. Let me check how `Game::new_test` is used elsewhere:
+[0m→ [0mRead src/lib.rs
+[0m
+[0m← [0mEdit src/core/game.rs
+Index: /home/anonymous/projects/rougelike/src/core/game.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/game.rs
++++ /home/anonymous/projects/rougelike/src/core/game.rs
+@@ -782,4 +782,58 @@
+             date: "1970-01-01".to_string(),
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn game_with_kill() -> Game {
++        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
++        g.monsters.clear();
++        let mut m = crate::entities::monster::Monster::new(
++            crate::data::monsters::MONSTERS[0].clone(),
++            (5, 5),
++        );
++        m.xp = 5;
++        g.monsters.push(m);
++        g
++    }
++
++    #[test]
++    fn kill_crossing_threshold_levels_up() {
++        let mut g = game_with_kill();
++        let (max_hp_before, max_ep_before) = (g.player.max_hp, g.player.max_ep);
++        g.player.xp = 99;
++        g.player.hp = 10;
++        g.kill_monster(0, "slain");
++        assert_eq!(g.player.level, 2);
++        assert_eq!(g.player.xp, 4);
++        assert_eq!(g.player.max_hp, max_hp_before + 2);
++        assert_eq!(g.player.max_ep, max_ep_before + 2);
++        assert_eq!(g.player.hp, g.player.max_hp);
++        assert!(g
++            .messages
++            .all()
++            .iter()
++            .any(|m| m.text == "You are now level 2!"));
++        assert_eq!(g.events.back().copied(), Some(GameEvent::LevelUp));
++    }
++
++    #[test]
++    fn kill_without_levelup_only_adds_xp() {
++        let mut g = game_with_kill();
++        let (max_hp_before, max_ep_before) = (g.player.max_hp, g.player.max_ep);
++        g.kill_monster(0, "slain");
++        assert_eq!(g.player.level, 1);
++        assert_eq!(g.player.xp, 5);
++        assert_eq!(g.player.max_hp, max_hp_before);
++        assert_eq!(g.player.max_ep, max_ep_before);
++        assert!(!g
++            .messages
++            .all()
++            .iter()
++            .any(|m| m.text.starts_with("You are now level")));
++        assert!(g.drain_events().iter().all(|e| !matches!(e, GameEvent::LevelUp)));
++    }
++}
+
+[0m
+Now add tests to the end of `game.rs`:
+[0m→ [0mRead src/core/game.rs[90m [offset=770][0m
+[0m
+[0m← [0mEdit src/core/game.rs
+Index: /home/anonymous/projects/rougelike/src/core/game.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/game.rs
++++ /home/anonymous/projects/rougelike/src/core/game.rs
+@@ -816,9 +816,9 @@
+         .messages
+         .all()
+         .iter()
+         .any(|m| m.text == "You are now level 2!"));
+-    assert_eq!(g.events.back().copied(), Some(GameEvent::LevelUp));
++    assert_eq!(g.events.back().cloned(), Some(GameEvent::LevelUp));
+ }
+ 
+ #[test]
+ fn kill_without_levelup_only_adds_xp() {
+
+[0m
+`GameEvent` is `Clone` but not `Copy`, so `.copied()` won't compile. Fixing:
+[0m$ [0mcargo test 2>&1 | tail -40
+test core::rng::tests::deterministic ... ok
+test map::fov::tests::sees_own_tile ... ok
+test entities::monster::tests::spawn_keeps_tier_correct ... ok
+test map::fov::tests::wall_blocks ... ok
+test entities::monster::tests::spawn_picks_varied_species_within_tier ... ok
+test map::path::tests::unreachable ... ok
+test map::path::tests::straight_path ... ok
+test core::game::tests::kill_without_levelup_only_adds_xp ... ok
+test core::game::tests::kill_crossing_threshold_levels_up ... FAILED
+test hiscore::tests::death_and_victory_same_turn_record_once ... ok
+test hiscore::tests::death_records_exactly_one_entry ... ok
+test hiscore::tests::in_progress_run_records_nothing ... ok
+test hiscore::tests::victory_records_exactly_one_entry ... ok
+test save::tests::death_turn_leaves_no_autosave ... ok
+test save::tests::mid_run_autosave_writes_loadable_save ... ok
+test save::tests::save_load_preserves_monsters ... ok
+test save::tests::save_load_rng_stream_continues ... ok
+test save::tests::victory_turn_leaves_no_autosave ... ok
+test save::tests::load_rejects_dead_autosave_on_disk ... ok
+test save::tests::dead_game_autosave_writes_nothing ... ok
+test save::tests::load_rejects_won_autosave_on_disk ... ok
+test save::tests::won_game_autosave_writes_nothing ... ok
+
+failures:
+
+---- core::game::tests::kill_crossing_threshold_levels_up stdout ----
+
+thread 'core::game::tests::kill_crossing_threshold_levels_up' (148508) panicked at src/core/game.rs:820:9:
+assertion `left == right` failed
+  left: Some(MonsterDeath { tier: 1 })
+ right: Some(LevelUp)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    core::game::tests::kill_crossing_threshold_levels_up
+
+test result: FAILED. 28 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `--lib`
+[0m
+[0m← [0mEdit src/core/game.rs
+Index: /home/anonymous/projects/rougelike/src/core/game.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/game.rs
++++ /home/anonymous/projects/rougelike/src/core/game.rs
+@@ -816,9 +816,12 @@
+         .messages
+         .all()
+         .iter()
+         .any(|m| m.text == "You are now level 2!"));
+-    assert_eq!(g.events.back().cloned(), Some(GameEvent::LevelUp));
++    assert!(g
++        .events
++        .iter()
++        .any(|e| matches!(e, GameEvent::LevelUp)));
+ }
+ 
+ #[test]
+ fn kill_without_levelup_only_adds_xp() {
+
+[0m
+`MonsterDeath` is emitted after the level-up, so use a containment check instead:
+[0m$ [0mcargo test 2>&1 | tail -15
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/main.rs (target/debug/deps/deepdelve-55d92906cdf8662b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests deepdelve
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[0m
+All 29 tests pass. Let me check formatting and review the diff:
+[0m$ [0mcargo fmt && git diff --stat && git status --short
+src/audio/synth.rs     |  14 +-
+ src/core/action.rs     |  10 +-
+ src/core/game.rs       | 118 +++++++---
+ src/core/message.rs    |   5 +-
+ src/core/rng.rs        |   2 +-
+ src/data/monsters.rs   | 611 +++++++++++++++++++++++++++++++++++++++++++++----
+ src/data/quests.rs     |   3 +-
+ src/data/races.rs      |   7 +-
+ src/entities/ai.rs     |  11 +-
+ src/entities/player.rs |  14 +-
+ src/items/catalog.rs   |   6 +-
+ src/items/item.rs      |   5 +-
+ src/lib.rs             |  11 +-
+ src/magic.rs           |  11 +-
+ src/main.rs            |  20 +-
+ src/map/fov.rs         |   6 +-
+ src/map/gen/mod.rs     |  18 +-
+ src/map/level.rs       |   9 +-
+ src/map/path.rs        |  21 +-
+ src/status.rs          |   4 +-
+ src/ui/app.rs          |   7 +-
+ src/ui/menu.rs         |  43 ++--
+ src/ui/panels.rs       |   6 +-
+ src/ui/render.rs       |  45 ++--
+ 24 files changed, 782 insertions(+), 225 deletions(-)
+ M src/audio/synth.rs
+ M src/core/action.rs
+ M src/core/game.rs
+ M src/core/message.rs
+ M src/core/rng.rs
+ M src/data/monsters.rs
+ M src/data/quests.rs
+ M src/data/races.rs
+ M src/entities/ai.rs
+ M src/entities/player.rs
+ M src/items/catalog.rs
+ M src/items/item.rs
+ M src/lib.rs
+ M src/magic.rs
+ M src/main.rs
+ M src/map/fov.rs
+ M src/map/gen/mod.rs
+ M src/map/level.rs
+ M src/map/path.rs
+ M src/status.rs
+ M src/ui/app.rs
+ M src/ui/menu.rs
+ M src/ui/panels.rs
+ M src/ui/render.rs
+?? .opencode/
+?? .scratch/implement-all.log
+?? scripts/
+[0m
+[0m$ [0mgit checkout -- src/ && git status --short
+?? .opencode/
+?? .scratch/implement-all.log
+?? scripts/
+[0m
+`cargo fmt` ended up reformatting the entire repository (which has never once been fmt-compliant). I'll revert all the formatting changes and only re-apply my own changes:
+[0m← [0mEdit src/core/game.rs
+Index: /home/anonymous/projects/rougelike/src/core/game.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/game.rs
++++ /home/anonymous/projects/rougelike/src/core/game.rs
+@@ -323,13 +323,20 @@
+ let tier = m.tier();
+ let name = m.name.clone();
+ self.player.kills += 1;
+ let xp = m.xp;
+-self.player.xp += xp;
++let leveled_up = self.player.gain_xp(xp);
+ self.log(
+     crate::core::message::MessageKind::Good,
+     format!("{name} is {how} (+{xp} XP)"),
+ );
++if leveled_up {
++    self.log(
++        crate::core::message::MessageKind::Good,
++        format!("You are now level {}!", self.player.level),
++    );
++    self.emit(GameEvent::LevelUp);
++}
+ self.emit(GameEvent::MonsterDeath { tier });
+ if crate::items::loot::maybe_drop(&mut self.rng, tier) {
+     let drop = crate::items::loot::roll_drop(
+         &mut self.rng,
+
+[0m
+[0m← [0mEdit src/core/game.rs
+Index: /home/anonymous/projects/rougelike/src/core/game.rs
+===================================================================
+--- /home/anonymous/projects/rougelike/src/core/game.rs
++++ /home/anonymous/projects/rougelike/src/core/game.rs
+@@ -782,4 +782,61 @@
+             date: "1970-01-01".to_string(),
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn game_with_kill() -> Game {
++        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
++        g.monsters.clear();
++        let mut m = crate::entities::monster::Monster::new(
++            crate::data::monsters::MONSTERS[0].clone(),
++            (5, 5),
++        );
++        m.xp = 5;
++        g.monsters.push(m);
++        g
++    }
++
++    #[test]
++    fn kill_crossing_threshold_levels_up() {
++        let mut g = game_with_kill();
++        let (max_hp_before, max_ep_before) = (g.player.max_hp, g.player.max_ep);
++        g.player.xp = 99;
++        g.player.hp = 10;
++        g.kill_monster(0, "slain");
++        assert_eq!(g.player.level, 2);
++        assert_eq!(g.player.xp, 4);
++        assert_eq!(g.player.max_hp, max_hp_before + 2);
++        assert_eq!(g.player.max_ep, max_ep_before + 2);
++        assert_eq!(g.player.hp, g.player.max_hp);
++        assert!(g
++            .messages
++            .all()
++            .iter()
++            .any(|m| m.text == "You are now level 2!"));
++        assert!(g
++            .events
++            .iter()
++            .any(|e| matches!(e, GameEvent::LevelUp)));
++    }
++
++    #[test]
++    fn kill_without_levelup_only_adds_xp() {
++        let mut g = game_with_kill();
++        let (max_hp_before, max_ep_before) = (g.player.max_hp, g.player.max_ep);
++        g.kill_monster(0, "slain");
++        assert_eq!(g.player.level, 1);
++        assert_eq!(g.player.xp, 5);
++        assert_eq!(g.player.max_hp, max_hp_before);
++        assert_eq!(g.player.max_ep, max_ep_before);
++        assert!(!g
++            .messages
++            .all()
++            .iter()
++            .any(|m| m.text.starts_with("You are now level")));
++        assert!(g.drain_events().iter().all(|e| !matches!(e, GameEvent::LevelUp)));
++    }
++}
+
+[0m
+[0m$ [0msed -n '780,790p' src/core/game.rs | cat -A | head -12; cargo test 2>&1 | tail -8
+won: self.won,$
+            cause: DeathCause::Slain,$
+            date: "1970-01-01".to_string(),$
+        }$
+    }$
+}$
+$
+#[cfg(test)]$
+mod tests {$
+    use super::*;$
+$
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests deepdelve
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[0m
+[0m$ [0mcargo test 2>&1 | grep -E "test result|FAILED|error"
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[0m
+[0m$ [0mgit status --short && git diff src/core/game.rs | head -80
+M src/core/game.rs
+?? .opencode/
+?? .scratch/implement-all.log
+?? scripts/
+diff --git a/src/core/game.rs b/src/core/game.rs
+index 85c84b3..65fcf66 100644
+--- a/src/core/game.rs
++++ b/src/core/game.rs
+@@ -324,11 +324,18 @@ impl Game {
+         let name = m.name.clone();
+         self.player.kills += 1;
+         let xp = m.xp;
+-        self.player.xp += xp;
++        let leveled_up = self.player.gain_xp(xp);
+         self.log(
+             crate::core::message::MessageKind::Good,
+             format!("{name} is {how} (+{xp} XP)"),
+         );
++        if leveled_up {
++            self.log(
++                crate::core::message::MessageKind::Good,
++                format!("You are now level {}!", self.player.level),
++            );
++            self.emit(GameEvent::LevelUp);
++        }
+         self.emit(GameEvent::MonsterDeath { tier });
+         if crate::items::loot::maybe_drop(&mut self.rng, tier) {
+             let drop = crate::items::loot::roll_drop(
+@@ -776,3 +783,60 @@ impl Game {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn game_with_kill() -> Game {
++        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
++        g.monsters.clear();
++        let mut m = crate::entities::monster::Monster::new(
++            crate::data::monsters::MONSTERS[0].clone(),
++            (5, 5),
++        );
++        m.xp = 5;
++        g.monsters.push(m);
++        g
++    }
++
++    #[test]
++    fn kill_crossing_threshold_levels_up() {
++        let mut g = game_with_kill();
++        let (max_hp_before, max_ep_before) = (g.player.max_hp, g.player.max_ep);
++        g.player.xp = 99;
++        g.player.hp = 10;
++        g.kill_monster(0, "slain");
++        assert_eq!(g.player.level, 2);
++        assert_eq!(g.player.xp, 4);
++        assert_eq!(g.player.max_hp, max_hp_before + 2);
++        assert_eq!(g.player.max_ep, max_ep_before + 2);
++        assert_eq!(g.player.hp, g.player.max_hp);
++        assert!(g
++            .messages
++            .all()
++            .iter()
++            .any(|m| m.text == "You are now level 2!"));
++        assert!(g
++            .events
++            .iter()
++            .any(|e| matches!(e, GameEvent::LevelUp)));
++    }
++
++    #[test]
++    fn kill_without_levelup_only_adds_xp() {
++        let mut g = game_with_kill();
++        let (max_hp_before, max_ep_before) = (g.player.max_hp, g.player.max_ep);
++        g.kill_monster(0, "slain");
++        assert_eq!(g.player.level, 1);
++        assert_eq!(g.player.xp, 5);
++        assert_eq!(g.player.max_hp, max_hp_before);
++        assert_eq!(g.player.max_ep, max_ep_before);
++        assert!(!g
++            .messages
++            .all()
+[0m
+All 29 tests pass. Verify the diff is scoped to `game.rs`, then commit:
+[0m$ [0mgit add src/core/game.rs && git commit -m "Fix player never leveling up (issue 07)
+
+Route monster-kill XP through Player::gain_xp instead of a raw
+player.xp += xp, so level-ups fire with max_hp/max_ep growth and
+full heal, log the level-up to the message log, and emit the
+existing GameEvent::LevelUp for audio. Add tests for both the
+leveling and non-leveling kill paths.
+
+Issue: .scratch/deepdelve/issues/07-never-levels-up.md"
+[master 9b9162d] Fix player never leveling up (issue 07)
+ 1 file changed, 65 insertions(+), 1 deletion(-)
+[0m
+Diff is clean. Committing:
+Done. Issue 07 fixed in `src/core/game.rs`:
+
+- `kill_monster` (src/core/game.rs:327) now routes XP through `player.gain_xp(xp)` instead of the raw `player.xp += xp`.
+- On level-up it logs "You are now level N!" to the message log and emits the pre-existing `GameEvent::LevelUp` (audio).
+- Added two tests: a kill crossing the threshold levels up with max-stat growth, full heal, log entry, and event; a non-leveling kill only adds XP with no side effects.
+- All 29 `cargo test` tests pass; committed as `9b9162d`.
+[07] COMMITTED: 9b9162d Fix player never leveling up (issue 07)
+[07] END 17:08:04
+[08] START 17:08:04
+[0m
+> build · Qwen3.8-27B-IQ3_XXS
+[0m
+[0m→ [0mRead .scratch/deepdelve/issues/08-take-off-ignores-slot.md
+[0m✱ [0mGrep "take_off_item"[90m 7 matches[0m
+[0m✱ [0mGrep "TakeOff"[90m 7 matches[0m
+[0m→ [0mRead src/core/game.rs[90m [offset=180, limit=120][0m
+[0m→ [0mRead src/core/game.rs[90m [offset=440, limit=80][0m
+[0m✱ [0mGrep "TakeOff|take_off"[90m in src/ui · 0 matches[0m
+[0m✱ [0mGrep "rings"[90m in src · 7 matches[0m
+[0m✱ [0mGrep "Action::"[90m in src/ui · 14 matches[0m
+[0m✱ [0mGrep "TakeOff|Wear\(|Wield\("[90m in src · 6 matches[0m
+[0m✱ [0mGrep "Take Off|take off|take_off"[90m in src · 2 matches[0m
+[0m→ [0mRead src/core/action.rs
+[0m✱ [0mGlob "src/**/*.rs"[90m 45 matches[0m
+[0m✱ [0mGrep "TakeOff|Take Off"[90m in src/ui · 0 matches[0m
+[0m→ [0mRead src/entities/player.rs
+[0m→ [0mRead src/ui/menu.rs
+[0m✱ [0mGrep "Action|ring_off|wear|wield"[90m in src/ui/panels.rs · 20 matches[0m
+[0m✱ [0mGrep "UseItem|Drop\(|Wear|Wield|Ring"[90m in src/ui/app.rs · 0 matches[0m
+[0m→ [0mRead src/ui/app.rs
+[0m→ [0mRead src/items/item.rs
+[0m→ [0mRead src/ui/panels.rs
+[0m→ [0mRead src/core/game.rs[90m [offset=520, limit=100][0m
+[0m→ [0mRead src/core/game.rs[90m [offset=620, limit=230][0m
+[0m→ [0mRead src/core/game.rs[90m [offset=1, limit=180][0m
