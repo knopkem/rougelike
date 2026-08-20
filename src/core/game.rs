@@ -651,44 +651,22 @@ impl Game {
         }
     }
 
-    fn identify_item(&mut self, slot: usize) {
+    pub fn identify_item(&mut self, slot: usize) {
         if slot < self.player.inventory.len() {
             self.player.inventory[slot].identified = true;
         }
     }
 
     fn apply_potion(&mut self, item: &Item) {
-        use crate::items::item::PotionKind;
-        match item.kind {
-            crate::items::item::ItemKind::Potion(PotionKind::Healing(small)) => {
-                let heal = if small { 10 } else { 30 };
-                self.player.hp = (self.player.hp + heal).min(self.player.max_hp);
-                self.log(
-                    crate::core::message::MessageKind::Good,
-                    format!("You feel better. (+{heal} HP)"),
-                );
-            }
-            crate::items::item::ItemKind::Potion(PotionKind::CurePoison) => {
-                self.statuses.poison = 0;
-                self.log(
-                    crate::core::message::MessageKind::Good,
-                    "You feel the poison leave your body.",
-                );
-            }
-            _ => {
-                self.log(
-                    crate::core::message::MessageKind::Normal,
-                    format!("You drink the {}.", item.name()),
-                );
-            }
+        if let crate::items::item::ItemKind::Potion(kind) = item.kind {
+            crate::magic::apply_potion(self, kind);
         }
     }
 
     fn apply_scroll(&mut self, item: &Item) {
-        self.log(
-            crate::core::message::MessageKind::Normal,
-            format!("You read the {}.", item.name()),
-        );
+        if let crate::items::item::ItemKind::Scroll(kind) = item.kind {
+            crate::magic::apply_scroll(self, kind);
+        }
     }
 
       fn monster_turns(&mut self) {

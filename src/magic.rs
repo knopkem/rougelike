@@ -67,7 +67,7 @@ pub fn cast_wand(rng: &mut Rng, game: &mut Game, item: &Item, target: (u8, u8)) 
     }
 }
 
-pub fn apply_potion_full(game: &mut Game, kind: PotionKind) {
+pub fn apply_potion(game: &mut Game, kind: PotionKind) {
     match kind {
         PotionKind::Healing(small) => {
             let heal = if small { 10u8 } else { 30 };
@@ -91,29 +91,448 @@ pub fn apply_potion_full(game: &mut Game, kind: PotionKind) {
                 "You feel a surge of energy.",
             );
         }
-        _ => {
+        PotionKind::Restore => {
+            game.statuses.poison = 0;
+            game.statuses.disease = 0;
+            game.statuses.confusion = 0;
+            game.statuses.paralysis = 0;
+            game.log(
+                crate::core::message::MessageKind::Good,
+                "You feel restored.",
+            );
+        }
+        PotionKind::Identify => identify_items(game),
+        PotionKind::Invisibility => {
+            game.statuses.invisible = 10;
+            game.log(
+                crate::core::message::MessageKind::Good,
+                "You become invisible!",
+            );
+        }
+        PotionKind::Antidote => {
             game.log(
                 crate::core::message::MessageKind::Normal,
-                "You drink the potion.",
+                "It tastes bad. (It was just water.)",
             );
+        }
+        PotionKind::Mutation => {
+            let step = |v: u8, up: bool| {
+                if up {
+                    v.saturating_add(1)
+                } else {
+                    v.saturating_sub(1)
+                }
+            };
+            let idx = game.rng.int(0..6) as usize;
+            let up = game.rng.chance(50);
+            let label = match idx {
+                0 => "STR",
+                1 => "DEX",
+                2 => "CON",
+                3 => "INT",
+                4 => "WIS",
+                _ => "CHA",
+            };
+            match idx {
+                0 => game.player.str = step(game.player.str, up),
+                1 => game.player.dex = step(game.player.dex, up),
+                2 => game.player.con = step(game.player.con, up),
+                3 => game.player.int = step(game.player.int, up),
+                4 => game.player.wis = step(game.player.wis, up),
+                _ => game.player.cha = step(game.player.cha, up),
+            };
+            if up {
+                game.log(
+                    crate::core::message::MessageKind::Good,
+                    format!("Your body shifts. ({label} +1)"),
+                );
+            } else {
+                game.log(
+                    crate::core::message::MessageKind::Bad,
+                    format!("Your body shifts. ({label} -1)"),
+                );
+            }
         }
     }
 }
 
-pub fn apply_scroll_full(game: &mut Game, kind: ScrollKind) {
+pub fn apply_scroll(game: &mut Game, kind: ScrollKind) {
     match kind {
+        ScrollKind::Identify => identify_items(game),
         ScrollKind::Teleport => {
-            game.emit(crate::core::events::GameEvent::Teleport);
+            let before = game.player.pos;
+            let level = game.current();
+            let candidates: Vec<(u8, u8)> = level
+                .floor_tiles()
+                .into_iter()
+                .filter(|p| *p != before)
+                .filter(|p| !game.monsters.iter().any(|m| m.pos == *p && !m.dead))
+                .collect();
+            match game.rng.pick(&candidates) {
+                Some(pos) => {
+                    game.player.pos = pos;
+                    game.emit(crate::core::events::GameEvent::Teleport);
+                    game.log(
+                        crate::core::message::MessageKind::Normal,
+                        "You blink out of reality!",
+                    );
+                }
+                None => game.log(
+                    crate::core::message::MessageKind::Normal,
+                    "Nothing happens.",
+                ),
+            }
+        }
+        ScrollKind::EnchantWeapon => {
+            let Some(item) = game.player.wielded.as_mut() else {
+                game.log(
+                    crate::core::message::MessageKind::Normal,
+                    "You are not wielding a weapon.",
+                );
+                return;
+            };
+            item.enchant = item.enchant.saturating_add(1);
             game.log(
-                crate::core::message::MessageKind::Normal,
-                "You blink out of reality!",
+                crate::core::message::MessageKind::Good,
+                "The weapon shimmers.",
             );
         }
-        _ => {
+        ScrollKind::EnchantArmor => {
+            let Some(item) = game.player.armor.as_mut() else {
+                game.log(
+                    crate::core::message::MessageKind::Normal,
+                    "You are not wearing any armor.",
+                );
+                return;
+            };
+            item.defense = item.defense.saturating_add(1);
             game.log(
-                crate::core::message::MessageKind::Normal,
-                "You read the scroll.",
+                crate::core::message::MessageKind::Good,
+                "The armor shimmers.",
             );
         }
+        ScrollKind::RemoveCurse => {
+            for item in game.player.inventory.iter_mut() {
+                item.cursed = false;
+            }
+            if let Some(item) = game.player.wielded.as_mut() {
+                item.cursed = false;
+            }
+            if let Some(item) = game.player.armor.as_mut() {
+                item.cursed = false;
+            }
+            for item in game.player.rings.iter_mut() {
+                item.cursed = false;
+            }
+            game.log(
+                crate::core::message::MessageKind::Good,
+                "A weight lifts from your items.",
+            );
+        }
+        ScrollKind::Mapping => {
+            let level = game.current_mut();
+            for (i, t) in level.tiles.iter().enumerate() {
+                if *t != crate::map::level::Tile::Wall {
+                    level.explored[i] = true;
+                }
+            }
+            game.log(
+                crate::core::message::MessageKind::Good,
+                "The level layout becomes clear to you.",
+            );
+        }
+        ScrollKind::GodsMessage => {
+            game.log(
+                crate::core::message::MessageKind::System,
+                "The god whispers: 'The Amulet rests in the deep dark.'",
+            );
+        }
+        ScrollKind::Opening => {
+            let pos = game.player.pos;
+            if game.current().tile_at(pos) == crate::map::level::Tile::DoorClosed {
+                game.current_mut().set_tile(pos, crate::map::level::Tile::Floor);
+                game.emit(crate::core::events::GameEvent::Door {
+                    opened: true,
+                    locked: false,
+                });
+                game.log(
+                    crate::core::message::MessageKind::Normal,
+                    "The door swings open.",
+                );
+            } else {
+                game.log(
+                    crate::core::message::MessageKind::Normal,
+                    "Nothing happens.",
+                );
+            }
+        }
+        ScrollKind::Fear => {
+            let player_pos = game.player.pos;
+            for m in game.monsters.iter_mut() {
+                if m.dead {
+                    continue;
+                }
+                let dx = (m.pos.0 as i32 - player_pos.0 as i32).abs();
+                let dy = (m.pos.1 as i32 - player_pos.1 as i32).abs();
+                if dx + dy <= 10 {
+                    m.hp = m.hp.saturating_sub(50);
+                }
+            }
+            let fled: Vec<String> = game
+                .monsters
+                .iter()
+                .filter(|m| !m.dead)
+                .take(1)
+                .map(|m| m.name.clone())
+                .collect();
+            if !fled.is_empty() {
+                game.log(
+                    crate::core::message::MessageKind::Good,
+                    format!("{} flees in terror!", fled[0]),
+                );
+            } else {
+                game.log(
+                    crate::core::message::MessageKind::Normal,
+                    "The monsters nearby cower in fear.",
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::items::catalog::{make_potion, make_weapon};
+
+    #[test]
+    fn healing_potion_restores_hp() {
+        let mut g = crate::tests_harness::new_game(42);
+        g.player.hp = 5;
+        apply_potion(&mut g, PotionKind::Healing(true));
+        assert_eq!(g.player.hp, 15);
+    }
+
+    #[test]
+    fn energy_potion_refills_ep() {
+        let mut g = crate::tests_harness::new_game(42);
+        g.player.ep = 0;
+        apply_potion(&mut g, PotionKind::Energy);
+        assert_eq!(g.player.ep, g.player.max_ep);
+    }
+
+    #[test]
+    fn cure_poison_potion_clears_poison() {
+        let mut g = crate::tests_harness::new_game(42);
+        g.statuses.poison = 3;
+        apply_potion(&mut g, PotionKind::CurePoison);
+        assert_eq!(g.statuses.poison, 0);
+    }
+
+    #[test]
+    fn restore_potion_clears_bad_statuses() {
+        let mut g = crate::tests_harness::new_game(42);
+        g.statuses.poison = 3;
+        g.statuses.disease = 2;
+        g.statuses.confusion = 4;
+        g.statuses.paralysis = 1;
+        apply_potion(&mut g, PotionKind::Restore);
+        assert_eq!(g.statuses.poison, 0);
+        assert_eq!(g.statuses.disease, 0);
+        assert_eq!(g.statuses.confusion, 0);
+        assert_eq!(g.statuses.paralysis, 0);
+    }
+
+    #[test]
+    fn invisibility_potion_grants_invisibility() {
+        let mut g = crate::tests_harness::new_game(42);
+        apply_potion(&mut g, PotionKind::Invisibility);
+        assert!(g.statuses.invisible > 0);
+    }
+
+    #[test]
+    fn identify_potion_identifies_unidentified_item() {
+        let mut g = crate::tests_harness::new_game(42);
+        g.player.inventory.push(make_potion(PotionKind::Energy));
+        assert!(!g.player.inventory[0].identified);
+        apply_potion(&mut g, PotionKind::Identify);
+        assert!(g.player.inventory[0].identified);
+    }
+
+    #[test]
+    fn teleport_scroll_moves_player_to_walkable_tile() {
+        let mut g = crate::tests_harness::new_game(42);
+        g.monsters.clear();
+        let before = g.player.pos;
+        apply_scroll(&mut g, ScrollKind::Teleport);
+        assert_ne!(g.player.pos, before);
+        assert!(g.current().is_walkable(g.player.pos));
+        assert!(g
+            .drain_events()
+            .iter()
+            .any(|e| matches!(e, crate::core::events::GameEvent::Teleport)));
+    }
+
+    #[test]
+    fn teleport_scroll_avoids_occupied_tiles() {
+        let mut g = crate::tests_harness::new_game(7);
+        let level = g.current().clone();
+        g.monsters.clear();
+        for p in level.floor_tiles() {
+            if p != g.player.pos {
+                let mut m = crate::entities::monster::Monster::new(
+                    crate::data::monsters::MONSTERS[0].clone(),
+                    p,
+                );
+                m.pos = p;
+                g.monsters.push(m);
+            }
+        }
+        assert!(!g.monsters.is_empty(), "setup sanity: monsters exist");
+        // Every walkable tile except the player's is occupied: teleport must
+        // not move the player and must not place it on a monster.
+        apply_scroll(&mut g, ScrollKind::Teleport);
+        assert!(
+            !g
+                .monsters
+                .iter()
+                .any(|m| m.pos == g.player.pos && !m.dead),
+            "player must not land on a monster"
+        );
+        assert!(g.current().is_walkable(g.player.pos));
+    }
+
+    #[test]
+    fn identify_scroll_identifies_inventory_item() {
+        let mut g = crate::tests_harness::new_game(42);
+        g.player.inventory.push(make_potion(PotionKind::Energy));
+        assert!(!g.player.inventory[0].identified);
+        apply_scroll(&mut g, ScrollKind::Identify);
+        assert!(g.player.inventory[0].identified);
+    }
+
+    #[test]
+    fn identify_scroll_with_nothing_unidentified_logs_message() {
+        let mut g = crate::tests_harness::new_game(42);
+        let item = make_potion(PotionKind::Energy);
+        g.player.inventory.push(item);
+        apply_scroll(&mut g, ScrollKind::Identify);
+        assert!(g.player.inventory[0].identified);
+        apply_scroll(&mut g, ScrollKind::Identify);
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "You have nothing to identify."));
+    }
+
+    #[test]
+    fn enchant_weapon_scroll_enchants_wielded_weapon() {
+        let mut g = crate::tests_harness::new_game(42);
+        g.player.wielded = Some(make_weapon(
+            crate::items::item::WeaponKind::Dagger,
+            0,
+            false,
+            &mut g.rng,
+        ));
+        apply_scroll(&mut g, ScrollKind::EnchantWeapon);
+        assert_eq!(g.player.wielded.as_ref().unwrap().enchant, 1);
+    }
+
+    #[test]
+    fn enchant_weapon_scroll_without_weapon_logs_message() {
+        let mut g = crate::tests_harness::new_game(42);
+        apply_scroll(&mut g, ScrollKind::EnchantWeapon);
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "You are not wielding a weapon."));
+    }
+
+    #[test]
+    fn remove_curse_scroll_uncurses_items() {
+        let mut g = crate::tests_harness::new_game(42);
+        let mut item = make_potion(PotionKind::Energy);
+        item.cursed = true;
+        g.player.inventory.push(item);
+        apply_scroll(&mut g, ScrollKind::RemoveCurse);
+        assert!(!g.player.inventory[0].cursed);
+    }
+
+    #[test]
+    fn mapping_scroll_explores_current_level() {
+        let mut g = crate::tests_harness::new_game(42);
+        apply_scroll(&mut g, ScrollKind::Mapping);
+        let level = g.current();
+        for (i, t) in level.tiles.iter().enumerate() {
+            if *t != crate::map::level::Tile::Wall {
+                assert!(level.explored[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn opening_scroll_opens_adjacent_door() {
+        let mut g = crate::tests_harness::new_game(42);
+        let pos = g.player.pos;
+        g.current_mut().set_tile(pos, crate::map::level::Tile::DoorClosed);
+        apply_scroll(&mut g, ScrollKind::Opening);
+        assert_eq!(
+            g.current().tile_at(pos),
+            crate::map::level::Tile::Floor
+        );
+    }
+}
+
+/// Reveal the first unidentified item the player carries, if any.
+fn identify_items(game: &mut Game) {
+    if let Some(slot) = game
+        .player
+        .inventory
+        .iter()
+        .position(|i| !i.identified)
+    {
+        game.identify_item(slot);
+        let name = game.player.inventory[slot].name();
+        game.log(
+            crate::core::message::MessageKind::Good,
+            format!("You now know it is a {name}."),
+        );
+        return;
+    }
+    let mut name = None;
+    if let Some(item) = game.player.wielded.as_mut() {
+        if !item.identified {
+            item.identified = true;
+            name = Some(item.name());
+        }
+    }
+    if name.is_none() {
+        if let Some(item) = game.player.armor.as_mut() {
+            if !item.identified {
+                item.identified = true;
+                name = Some(item.name());
+            }
+        }
+    }
+    if name.is_none() {
+        for item in game.player.rings.iter_mut() {
+            if !item.identified {
+                item.identified = true;
+                name = Some(item.name());
+                break;
+            }
+        }
+    }
+    match name {
+        Some(name) => game.log(
+            crate::core::message::MessageKind::Good,
+            format!("You now know it is a {name}."),
+        ),
+        None => game.log(
+            crate::core::message::MessageKind::Normal,
+            "You have nothing to identify.",
+        ),
     }
 }
