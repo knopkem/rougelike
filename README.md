@@ -4,6 +4,17 @@ Note: This is an experience with local LLM (qwen3.8-27B) on minimal hardware: GP
 
 Baseline: IQ3-XXS model, q8_0 KV, 96K context
 
+System:
+
+- Ryzen 5700 32GB RAM
+- AMD 6800 XT 16GB VRAM
+- Ubuntu
+
+Harness:
+
+- llama-cpp-turboquant
+- opencode
+- mattpocock/skills
 
 ## Overview
 
