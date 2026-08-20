@@ -107,11 +107,10 @@ pub fn spawn_monster(rng: &mut Rng, depth: u8, endless: bool) -> Monster {
         .iter()
         .filter(|d| d.tier == tier)
         .collect();
-    let def = defs
-        .first()
-        .copied()
-        .unwrap_or(&crate::data::monsters::MONSTERS[0])
-        .clone();
+    let def = match rng.pick(&defs) {
+        Some(d) => d.clone(),
+        None => crate::data::monsters::MONSTERS[0].clone(),
+    };
     let mut m = Monster::new(def, (3, 3));
     if endless && depth > 25 {
         // Scale up.
@@ -144,6 +143,32 @@ mod tests {
         m.is_unique = true;
         m.ability_cooldown = 3;
         m
+    }
+
+    #[test]
+    fn spawn_picks_varied_species_within_tier() {
+        let mut rng = Rng::new(12345);
+        let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for _ in 0..100 {
+            let m = spawn_monster(&mut rng, 1, false);
+            assert_eq!(m.def.tier, 1);
+            names.insert(m.def.name.clone());
+        }
+        assert!(
+            names.len() > 1,
+            "tier 1 spawns should include multiple species, got {names:?}"
+        );
+    }
+
+    #[test]
+    fn spawn_keeps_tier_correct() {
+        let mut rng = Rng::new(7);
+        for depth in [1u8, 7, 12, 17, 22, 40] {
+            for _ in 0..20 {
+                let m = spawn_monster(&mut rng, depth, false);
+                assert_eq!(m.def.tier, tier_for_depth(depth));
+            }
+        }
     }
 
     #[test]

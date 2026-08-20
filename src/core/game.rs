@@ -142,8 +142,10 @@ impl Game {
     fn populate_monsters(&mut self, depth: u8) {
         let n = self.rng.int(3..8) as usize;
         let mut placed = 0;
-        let max = n + 4;
-        while placed < n && placed < max {
+        let mut attempts = 0;
+        let max_attempts = n + 4;
+        while placed < n && attempts < max_attempts {
+            attempts += 1;
             if let Some(p) = crate::map::gen::random_floor_tile(self, depth, &mut self.rng.clone()) {
                 if p != self.player.pos {
                     let mut m = crate::entities::monster::spawn_monster(
