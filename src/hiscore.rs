@@ -51,31 +51,7 @@ pub fn save(hs: &Hiscore) {
 mod tests {
     use super::*;
     use crate::core::action::Action;
-    use crate::tests_harness::new_game;
-    use std::sync::Mutex;
-
-    // Tests that observe the hiscore file must run one at a time because the
-    // data dir is selected via the process-wide XDG_DATA_HOME variable.
-    static LOCK: Mutex<()> = Mutex::new(());
-
-    fn with_isolated_data_dir(name: &str, f: impl FnOnce()) {
-        let _guard = LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join(format!(
-            "deepdelve-test-{}-{}",
-            std::process::id(),
-            name
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let previous = std::env::var("XDG_DATA_HOME").ok();
-        std::env::set_var("XDG_DATA_HOME", &dir);
-        f();
-        match previous {
-            Some(value) => std::env::set_var("XDG_DATA_HOME", value),
-            None => std::env::remove_var("XDG_DATA_HOME"),
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
+    use crate::tests_harness::{new_game, with_isolated_data_dir};
 
     fn turn_and_load(game: &mut Game) -> Hiscore {
         game.monsters.clear();

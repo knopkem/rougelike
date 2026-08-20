@@ -28,4 +28,30 @@ pub mod tests_harness {
     pub fn new_game(seed: u64) -> Game {
         Game::new_test("Test", "Human", "Warrior", seed)
     }
+
+    // Tests that touch the real data dir must run one at a time because the
+    // dir is selected via the process-wide XDG_DATA_HOME variable.
+    static DATA_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub fn with_isolated_data_dir(name: &str, f: impl FnOnce()) {
+        let _guard = match DATA_DIR_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "deepdelve-test-{}-{}",
+            std::process::id(),
+            name
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let previous = std::env::var("XDG_DATA_HOME").ok();
+        std::env::set_var("XDG_DATA_HOME", &dir);
+        f();
+        match previous {
+            Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+            None => std::env::remove_var("XDG_DATA_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

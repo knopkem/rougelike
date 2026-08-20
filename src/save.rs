@@ -19,6 +19,9 @@ pub fn save_dir() -> Option<PathBuf> {
 }
 
 pub fn autosave(game: &Game) {
+    if !game.alive || game.won {
+        return;
+    }
     let dir = match save_dir() {
         Some(d) => d,
         None => return,
@@ -42,6 +45,9 @@ pub fn load_autosave() -> Option<Game> {
     if file.version != SAVE_VERSION {
         return None;
     }
+    if !file.game.alive || file.game.won {
+        return None;
+    }
     Some(file.game)
 }
 
@@ -52,4 +58,132 @@ pub fn delete_save(_game: &Game) {
     };
     let path = dir.join("autosave.json");
     let _ = std::fs::remove_file(path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests_harness::{new_game, with_isolated_data_dir};
+
+    fn autosave_file_exists() -> bool {
+        save_dir()
+            .map(|d| d.join("autosave.json").exists())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn mid_run_autosave_writes_loadable_save() {
+        with_isolated_data_dir("mid_run", || {
+            let game = new_game(1);
+            assert!(game.alive && !game.won);
+            autosave(&game);
+            assert!(autosave_file_exists());
+            let loaded = load_autosave().expect("live autosave should load");
+            assert!(loaded.alive && !loaded.won);
+        });
+    }
+
+    #[test]
+    fn dead_game_autosave_writes_nothing() {
+        with_isolated_data_dir("dead_autosave", || {
+            let mut game = new_game(2);
+            game.alive = false;
+            autosave(&game);
+            assert!(!autosave_file_exists(), "dead game must not be autosaved");
+            assert!(load_autosave().is_none());
+        });
+    }
+
+    #[test]
+    fn won_game_autosave_writes_nothing() {
+        with_isolated_data_dir("won_autosave", || {
+            let mut game = new_game(3);
+            game.won = true;
+            autosave(&game);
+            assert!(!autosave_file_exists(), "won game must not be autosaved");
+            assert!(load_autosave().is_none());
+        });
+    }
+
+    #[test]
+    fn load_rejects_dead_autosave_on_disk() {
+        with_isolated_data_dir("load_dead", || {
+            let mut game = new_game(4);
+            game.alive = false;
+            // Simulate a stale autosave left by an older build.
+            let dir = save_dir().unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = SaveFile {
+                version: SAVE_VERSION,
+                game: game.clone(),
+            };
+            std::fs::write(
+                dir.join("autosave.json"),
+                serde_json::to_string_pretty(&file).unwrap(),
+            )
+            .unwrap();
+            assert!(
+                load_autosave().is_none(),
+                "dead autosave must not be offered as Continue"
+            );
+        });
+    }
+
+    #[test]
+    fn load_rejects_won_autosave_on_disk() {
+        with_isolated_data_dir("load_won", || {
+            let mut game = new_game(5);
+            game.won = true;
+            let dir = save_dir().unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = SaveFile {
+                version: SAVE_VERSION,
+                game: game.clone(),
+            };
+            std::fs::write(
+                dir.join("autosave.json"),
+                serde_json::to_string_pretty(&file).unwrap(),
+            )
+            .unwrap();
+            assert!(
+                load_autosave().is_none(),
+                "won autosave must not be offered as Continue"
+            );
+        });
+    }
+
+    #[test]
+    fn death_turn_leaves_no_autosave() {
+        with_isolated_data_dir("death_turn", || {
+            let mut game = new_game(6);
+            game.monsters.clear();
+            game.player.hunger = 0;
+            game.player.hp = 0;
+            game.do_turn(crate::core::action::Action::Wait);
+            // Mirrors the main loop: per-turn autosave after do_turn.
+            autosave(&game);
+            assert!(!game.alive);
+            assert!(
+                !autosave_file_exists(),
+                "no autosave may remain after the death turn"
+            );
+        });
+    }
+
+    #[test]
+    fn victory_turn_leaves_no_autosave() {
+        with_isolated_data_dir("victory_turn", || {
+            let mut game = new_game(7);
+            game.monsters.clear();
+            game.amulet_carried = true;
+            game.current_level = 25;
+            game.do_turn(crate::core::action::Action::Wait);
+            autosave(&game);
+            assert!(game.won);
+            assert!(
+                !autosave_file_exists(),
+                "no autosave may remain after the victory turn"
+            );
+        });
+    }
 }
