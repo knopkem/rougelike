@@ -1,8 +1,10 @@
 //! Seeded RNG wrapper. All randomness in the game flows through here so
 //! that a run is fully reproducible from a seed.
 //!
-//! The stream is a plain `StdRng` (ChaCha12). Saves only persist the seed;
-//! the in-memory stream is the source of truth, which keeps saves small.
+//! The stream is ChaCha8. Saves persist the generator's full state (plus
+//! the original seed as plain metadata), so the random stream continues
+//! exactly where it left off after a load instead of replaying the run's
+//! prefix.
 
 use rand::RngExt;
 use rand_core::{SeedableRng, TryRng};
@@ -19,15 +21,17 @@ pub struct Rng {
 
 impl Serialize for Rng {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_u64(self.seed)
+        // Persist the seed (metadata) and the full inner generator state,
+        // so a loaded run continues the same random stream.
+        (self.seed, &self.inner).serialize(s)
     }
 }
 
 impl<'de> Deserialize<'de> for Rng {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         use serde::de::Error;
-        let seed = u64::deserialize(d).map_err(|e: D::Error| e)?;
-        Ok(Self::new(seed))
+        let (seed, inner) = <(u64, ChaCha)>::deserialize(d).map_err(|e: D::Error| e)?;
+        Ok(Self { seed, inner })
     }
 }
 
@@ -137,5 +141,23 @@ mod tests {
         for _ in 0..100 {
             assert_eq!(a.u64(), b.u64());
         }
+    }
+
+    #[test]
+    fn roundtrip_continues_stream() {
+        let mut a = Rng::new(42);
+        // Advance past the run-start prefix, then round-trip a.
+        let prefix: Vec<u64> = (0..8).map(|_| a.u64()).collect();
+        let json = serde_json::to_string(&a).unwrap();
+
+        let loaded: Rng = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.seed, 42, "seed stays available as metadata");
+        let mut b = loaded;
+        // b sits at the same stream position as a, so their next draws
+        // must match, and must not replay the prefix.
+        let after: Vec<u64> = (0..16).map(|_| b.u64()).collect();
+        let expected: Vec<u64> = (0..16).map(|_| a.u64()).collect();
+        assert_eq!(after, expected, "stream must continue where it left off");
+        assert_ne!(after, prefix, "load must not replay the run-start prefix");
     }
 }

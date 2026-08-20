@@ -194,6 +194,29 @@ mod tests {
     }
 
     #[test]
+    fn save_load_rng_stream_continues() {
+        with_isolated_data_dir("rng_stream", || {
+            let mut game = new_game(11);
+            // Advance the stream past the run-start prefix.
+            let prefix: Vec<u64> = (0..8).map(|_| game.rng.u64()).collect();
+
+            autosave(&game);
+            let mut loaded = load_autosave().expect("autosave should load");
+            assert_eq!(loaded.seed, game.seed);
+
+            // The loaded rng sits at the same stream position as game's,
+            // so the next draws must match and must not replay the prefix.
+            let after: Vec<u64> = (0..16).map(|_| loaded.rng.u64()).collect();
+            let expected: Vec<u64> = (0..16).map(|_| game.rng.u64()).collect();
+            assert_eq!(
+                after, expected,
+                "post-load draws must continue the stream, not replay the prefix"
+            );
+            assert_ne!(after, prefix);
+        });
+    }
+
+    #[test]
     fn death_turn_leaves_no_autosave() {
         with_isolated_data_dir("death_turn", || {
             let mut game = new_game(6);
