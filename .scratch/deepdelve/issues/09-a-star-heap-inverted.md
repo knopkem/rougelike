@@ -44,3 +44,7 @@ standard A* practice). Paths are shortest-path optimal for the tile cost model.
 
 - Verified 2026-08-20: inverted `Ord` confirmed; also found a dead `visited`
   write in the same function — cleanup acceptable as part of this fix.
+- Fixed: `Node` now carries `g` and its `Ord` is inverted so `BinaryHeap`
+  pops minimum-f first (ties broken by larger g); dead `visited` write and
+  unused `std::f64::consts` import removed; added `detour_finds_optimal_path`
+  test (30-step detour vs 12-step optimum, reproduced the bug before the fix).

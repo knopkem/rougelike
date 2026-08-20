@@ -3,18 +3,18 @@
 use crate::map::level::Level;
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
-use std::f64::consts;
 
 #[derive(Clone, Copy)]
 struct Node {
     x: u8,
     y: u8,
+    g: f64,
     f: f64,
 }
 
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
-        self.f == other.f
+        self.f == other.f && self.g == other.g
     }
 }
 impl Eq for Node {}
@@ -24,8 +24,14 @@ impl PartialOrd for Node {
     }
 }
 impl Ord for Node {
+    // BinaryHeap pops the maximum, so invert the comparison: smallest f
+    // first, ties broken toward the larger g (closer to the goal).
     fn cmp(&self, other: &Self) -> Ordering {
-        self.f.partial_cmp(&other.f).unwrap_or(Ordering::Equal)
+        other
+            .f
+            .partial_cmp(&self.f)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| self.g.partial_cmp(&other.g).unwrap_or(Ordering::Equal))
     }
 }
 
@@ -62,11 +68,9 @@ pub fn astar(level: &Level, start: (u8, u8), goal: (u8, u8)) -> Option<Vec<(u8, 
     open.push(Node {
         x: start.0,
         y: start.1,
+        g: 0.0,
         f: heuristic(start, goal),
     });
-
-    let mut visited = vec![false; n];
-    visited[start_i] = true;
 
     while let Some(node) = open.pop() {
         let ci = node.y as usize * w + node.x as usize;
@@ -121,6 +125,7 @@ pub fn astar(level: &Level, start: (u8, u8), goal: (u8, u8)) -> Option<Vec<(u8, 
                 open.push(Node {
                     x: nx,
                     y: ny,
+                    g: tentative,
                     f: tentative + heuristic((nx, ny), goal),
                 });
             }
@@ -151,5 +156,33 @@ mod tests {
         lvl.set_tile((5, 10), Tile::Floor);
         let path = astar(&lvl, (5, 10), (10, 10));
         assert!(path.is_none());
+    }
+
+    #[test]
+    fn detour_finds_optimal_path() {
+        // Direct row y=10 is blocked at x=9..=11. Short route goes over the
+        // y=9 gap (12 steps); a corridor below offers a 30-step detour.
+        // With the inverted (max-f) heap the goal was popped via the detour.
+        let mut lvl = Level::new(1);
+        for x in 5..=15 {
+            if (9..=11).contains(&x) {
+                continue;
+            }
+            lvl.set_tile((x, 10), Tile::Floor);
+        }
+        for x in 8..=12 {
+            lvl.set_tile((x, 9), Tile::Floor);
+        }
+        for y in 11..=20 {
+            lvl.set_tile((5, y), Tile::Floor);
+            lvl.set_tile((15, y), Tile::Floor);
+        }
+        for x in 6..=14 {
+            lvl.set_tile((x, 20), Tile::Floor);
+        }
+        let path = astar(&lvl, (5, 10), (15, 10)).unwrap();
+        assert_eq!(path.len(), 12);
+        assert_eq!(path.first().unwrap(), &(6, 10));
+        assert_eq!(path.last().unwrap(), &(15, 10));
     }
 }
