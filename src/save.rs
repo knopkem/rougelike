@@ -71,6 +71,20 @@ mod tests {
             .unwrap_or(false)
     }
 
+    fn write_autosave_file(game: &Game) {
+        let dir = save_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = SaveFile {
+            version: SAVE_VERSION,
+            game: game.clone(),
+        };
+        std::fs::write(
+            dir.join("autosave.json"),
+            serde_json::to_string_pretty(&file).unwrap(),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn mid_run_autosave_writes_loadable_save() {
         with_isolated_data_dir("mid_run", || {
@@ -111,17 +125,7 @@ mod tests {
             let mut game = new_game(4);
             game.alive = false;
             // Simulate a stale autosave left by an older build.
-            let dir = save_dir().unwrap();
-            std::fs::create_dir_all(&dir).unwrap();
-            let file = SaveFile {
-                version: SAVE_VERSION,
-                game: game.clone(),
-            };
-            std::fs::write(
-                dir.join("autosave.json"),
-                serde_json::to_string_pretty(&file).unwrap(),
-            )
-            .unwrap();
+            write_autosave_file(&game);
             assert!(
                 load_autosave().is_none(),
                 "dead autosave must not be offered as Continue"
@@ -134,17 +138,7 @@ mod tests {
         with_isolated_data_dir("load_won", || {
             let mut game = new_game(5);
             game.won = true;
-            let dir = save_dir().unwrap();
-            std::fs::create_dir_all(&dir).unwrap();
-            let file = SaveFile {
-                version: SAVE_VERSION,
-                game: game.clone(),
-            };
-            std::fs::write(
-                dir.join("autosave.json"),
-                serde_json::to_string_pretty(&file).unwrap(),
-            )
-            .unwrap();
+            write_autosave_file(&game);
             assert!(
                 load_autosave().is_none(),
                 "won autosave must not be offered as Continue"

@@ -29,8 +29,8 @@ pub mod tests_harness {
         Game::new_test("Test", "Human", "Warrior", seed)
     }
 
-    // Tests that touch the real data dir must run one at a time because the
-    // dir is selected via the process-wide XDG_DATA_HOME variable.
+    // Tests that touch the data dir must run one at a time: the dir is
+    // selected via the process-wide XDG_DATA_HOME variable.
     static DATA_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     pub fn with_isolated_data_dir(name: &str, f: impl FnOnce()) {
