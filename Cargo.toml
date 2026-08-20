@@ -1,0 +1,33 @@
+[package]
+name = "deepdelve"
+version = "0.1.0"
+edition = "2021"
+description = "A terminal roguelike in Rust"
+license = "MIT"
+
+[dependencies]
+ratatui = "0.30"
+crossterm = "0.29"
+rand = "0.10"
+serde = { version = "1.0", features = ["derive", "rc"] }
+rand_core = "0.10"
+serde_json = "1.0"
+dirs = "6"
+thiserror = "2"
+rand_chacha = "0.10"
+
+[dependencies.rodio]
+version = "0.22"
+default-features = false
+features = ["playback"]
+optional = true
+
+[features]
+default = ["audio"]
+audio = ["dep:rodio"]
+
+[dev-dependencies]
+proptest = "1"
+
+[profile.release]
+lto = "thin"

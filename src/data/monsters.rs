@@ -1,0 +1,74 @@
+//! Monster definitions (~45 species, 5 tiers).
+
+use serde::{Deserialize, Serialize};
+
+use crate::entities::monster::Rarity;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonsterDef {
+    pub name: &'static str,
+    pub glyph: char,
+    pub tier: u8,
+    pub rarity: Rarity,
+    pub hp: u8,
+    pub xp: u32,
+    pub damage_die: u8,
+    pub attack: u8,
+    pub ac: u8,
+    pub speed: u8,
+}
+
+pub const MONSTERS: &[MonsterDef] = &[
+    // Tier 1 (D1-5)
+    MonsterDef { name: "bat", glyph: 'b', tier: 1, rarity: Rarity::Common, hp: 3, xp: 5, damage_die: 3, attack: 45, ac: 1, speed: 10 },
+    MonsterDef { name: "giant rat", glyph: 'r', tier: 1, rarity: Rarity::Common, hp: 4, xp: 5, damage_die: 3, attack: 46, ac: 1, speed: 10 },
+    MonsterDef { name: "cave slime", glyph: '%', tier: 1, rarity: Rarity::Common, hp: 5, xp: 6, damage_die: 3, attack: 44, ac: 2, speed: 8 },
+    MonsterDef { name: "goblin", glyph: 'g', tier: 1, rarity: Rarity::Common, hp: 6, xp: 8, damage_die: 4, attack: 48, ac: 1, speed: 10 },
+    MonsterDef { name: "hobgoblin", glyph: 'G', tier: 1, rarity: Rarity::Common, hp: 8, xp: 10, damage_die: 4, attack: 49, ac: 2, speed: 10 },
+    MonsterDef { name: "orc", glyph: 'o', tier: 1, rarity: Rarity::Common, hp: 10, xp: 12, damage_die: 5, attack: 50, ac: 2, speed: 10 },
+    MonsterDef { name: "skeleton", glyph: 'Z', tier: 1, rarity: Rarity::Common, hp: 8, xp: 12, damage_die: 4, attack: 48, ac: 2, speed: 10 },
+    MonsterDef { name: "zombie", glyph: 'Z', tier: 1, rarity: Rarity::Common, hp: 10, xp: 10, damage_die: 4, attack: 45, ac: 1, speed: 6 },
+    MonsterDef { name: "cultist", glyph: 'c', tier: 1, rarity: Rarity::Common, hp: 7, xp: 15, damage_die: 4, attack: 48, ac: 1, speed: 10 },
+    MonsterDef { name: "hound", glyph: 'd', tier: 1, rarity: Rarity::Common, hp: 9, xp: 14, damage_die: 5, attack: 50, ac: 2, speed: 12 },
+    MonsterDef { name: "spider", glyph: 's', tier: 1, rarity: Rarity::Common, hp: 6, xp: 10, damage_die: 4, attack: 47, ac: 1, speed: 12 },
+    MonsterDef { name: "snake", glyph: 's', tier: 1, rarity: Rarity::Common, hp: 5, xp: 8, damage_die: 4, attack: 46, ac: 1, speed: 12 },
+    MonsterDef { name: "gnoll", glyph: 'n', tier: 1, rarity: Rarity::Common, hp: 8, xp: 12, damage_die: 5, attack: 49, ac: 2, speed: 10 },
+    MonsterDef { name: "slime", glyph: '%', tier: 1, rarity: Rarity::Common, hp: 6, xp: 8, damage_die: 4, attack: 45, ac: 2, speed: 8 },
+    // Tier 2 (D6-10)
+    MonsterDef { name: "fungus", glyph: 'f', tier: 2, rarity: Rarity::Common, hp: 8, xp: 15, damage_die: 5, attack: 47, ac: 2, speed: 8 },
+    MonsterDef { name: "ghoul", glyph: 'G', tier: 2, rarity: Rarity::Common, hp: 12, xp: 20, damage_die: 6, attack: 50, ac: 2, speed: 10 },
+    MonsterDef { name: "vampire", glyph: 'V', tier: 2, rarity: Rarity::Uncommon, hp: 15, xp: 30, damage_die: 6, attack: 52, ac: 3, speed: 10 },
+    MonsterDef { name: "wraith", glyph: 'W', tier: 2, rarity: Rarity::Uncommon, hp: 12, xp: 25, damage_die: 6, attack: 51, ac: 3, speed: 10 },
+    MonsterDef { name: "ogre", glyph: 'O', tier: 2, rarity: Rarity::Common, hp: 20, xp: 25, damage_die: 8, attack: 52, ac: 3, speed: 8 },
+    MonsterDef { name: "troll", glyph: 'T', tier: 2, rarity: Rarity::Uncommon, hp: 25, xp: 30, damage_die: 8, attack: 53, ac: 3, speed: 10 },
+    MonsterDef { name: "harpy", glyph: 'h', tier: 2, rarity: Rarity::Common, hp: 10, xp: 18, damage_die: 5, attack: 50, ac: 2, speed: 12 },
+    MonsterDef { name: "minotaur", glyph: 'M', tier: 2, rarity: Rarity::Uncommon, hp: 18, xp: 28, damage_die: 8, attack: 52, ac: 4, speed: 10 },
+    MonsterDef { name: "basilisk", glyph: 'B', tier: 2, rarity: Rarity::Rare, hp: 16, xp: 30, damage_die: 7, attack: 51, ac: 3, speed: 8 },
+    MonsterDef { name: "cockatrice", glyph: 'c', tier: 2, rarity: Rarity::Rare, hp: 12, xp: 22, damage_die: 6, attack: 50, ac: 2, speed: 10 },
+    MonsterDef { name: "medusa", glyph: 'M', tier: 2, rarity: Rarity::Rare, hp: 14, xp: 28, damage_die: 6, attack: 51, ac: 3, speed: 10 },
+    MonsterDef { name: "ghost", glyph: 'G', tier: 2, rarity: Rarity::Common, hp: 10, xp: 20, damage_die: 5, attack: 49, ac: 2, speed: 10 },
+    // Tier 3 (D11-15)
+    MonsterDef { name: "demon", glyph: 'D', tier: 3, rarity: Rarity::Uncommon, hp: 20, xp: 40, damage_die: 9, attack: 55, ac: 4, speed: 10 },
+    MonsterDef { name: "archer", glyph: 'a', tier: 3, rarity: Rarity::Common, hp: 14, xp: 30, damage_die: 6, attack: 52, ac: 3, speed: 10 },
+    MonsterDef { name: "wizard", glyph: 'w', tier: 3, rarity: Rarity::Uncommon, hp: 15, xp: 35, damage_die: 7, attack: 53, ac: 3, speed: 10 },
+    MonsterDef { name: "fire elemental", glyph: 'F', tier: 3, rarity: Rarity::Uncommon, hp: 18, xp: 35, damage_die: 8, attack: 54, ac: 3, speed: 12 },
+    MonsterDef { name: "ice elemental", glyph: 'I', tier: 3, rarity: Rarity::Uncommon, hp: 18, xp: 35, damage_die: 8, attack: 54, ac: 3, speed: 12 },
+    MonsterDef { name: "manticore", glyph: 'm', tier: 3, rarity: Rarity::Common, hp: 16, xp: 32, damage_die: 7, attack: 53, ac: 3, speed: 12 },
+    MonsterDef { name: "chimera", glyph: 'C', tier: 3, rarity: Rarity::Rare, hp: 22, xp: 40, damage_die: 8, attack: 55, ac: 4, speed: 10 },
+    MonsterDef { name: "iron golem", glyph: 'I', tier: 3, rarity: Rarity::Rare, hp: 30, xp: 45, damage_die: 9, attack: 56, ac: 6, speed: 8 },
+    MonsterDef { name: "lich", glyph: 'L', tier: 3, rarity: Rarity::Rare, hp: 15, xp: 50, damage_die: 7, attack: 52, ac: 3, speed: 10 },
+    // Tier 4 (D16-20)
+    MonsterDef { name: "hellhound", glyph: 'h', tier: 4, rarity: Rarity::Uncommon, hp: 25, xp: 60, damage_die: 10, attack: 57, ac: 4, speed: 12 },
+    MonsterDef { name: "balrog", glyph: 'B', tier: 4, rarity: Rarity::Rare, hp: 35, xp: 80, damage_die: 12, attack: 59, ac: 5, speed: 10 },
+    MonsterDef { name: "dragon", glyph: 'D', tier: 4, rarity: Rarity::Rare, hp: 45, xp: 100, damage_die: 13, attack: 60, ac: 6, speed: 10 },
+    MonsterDef { name: "stone colossus", glyph: 'S', tier: 4, rarity: Rarity::Rare, hp: 50, xp: 90, damage_die: 14, attack: 61, ac: 7, speed: 8 },
+    MonsterDef { name: "vampire lord", glyph: 'V', tier: 4, rarity: Rarity::Rare, hp: 30, xp: 75, damage_die: 10, attack: 58, ac: 5, speed: 10 },
+    MonsterDef { name: "demon lord", glyph: 'D', tier: 4, rarity: Rarity::Rare, hp: 32, xp: 80, damage_die: 11, attack: 59, ac: 5, speed: 10 },
+    MonsterDef { name: "beholder", glyph: 'E', tier: 4, rarity: Rarity::Rare, hp: 28, xp: 70, damage_die: 9, attack: 57, ac: 4, speed: 10 },
+    // Tier 5 (D21-25)
+    MonsterDef { name: "abomination", glyph: 'A', tier: 5, rarity: Rarity::Rare, hp: 55, xp: 120, damage_die: 15, attack: 62, ac: 6, speed: 8 },
+    MonsterDef { name: "ancient dragon", glyph: 'D', tier: 5, rarity: Rarity::Legendary, hp: 70, xp: 150, damage_die: 16, attack: 64, ac: 7, speed: 10 },
+    MonsterDef { name: "death knight", glyph: 'K', tier: 5, rarity: Rarity::Legendary, hp: 50, xp: 130, damage_die: 14, attack: 63, ac: 6, speed: 10 },
+    MonsterDef { name: "abyss horror", glyph: 'A', tier: 5, rarity: Rarity::Rare, hp: 60, xp: 140, damage_die: 15, attack: 63, ac: 6, speed: 10 },
+    MonsterDef { name: "abyss lord", glyph: 'A', tier: 5, rarity: Rarity::Legendary, hp: 80, xp: 300, damage_die: 18, attack: 66, ac: 8, speed: 10 },
+];
