@@ -18,6 +18,14 @@ use crate::status::Statuses;
 
 pub const MAX_LEVELS: u8 = 26;
 
+/// Number of turns in one in-game day; `game_date` maps a run's turn count to days.
+pub const TURNS_PER_DAY: u64 = 30;
+
+/// The in-game date at the given run turn: day 1 is the first turn.
+pub fn game_date(turn: u64) -> String {
+    format!("Day {}", turn / TURNS_PER_DAY + 1)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeathCause {
     Slain,
@@ -27,6 +35,14 @@ pub enum DeathCause {
     Burned,
     Petrified,
     Other,
+}
+
+/// The last damage the player took: the source reported as the cause of death.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LastDamage {
+    pub cause: DeathCause,
+    /// Identity of the damage source, when it has one (e.g. the monster's name).
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +59,8 @@ pub struct ScoreInfo {
     pub seed: u64,
     pub won: bool,
     pub cause: DeathCause,
+    /// Identity of the killing source, when it has one (e.g. the monster's name).
+    pub killed_by: Option<String>,
     pub date: String,
 }
 
@@ -61,6 +79,8 @@ pub struct Game {
     pub events: VecDeque<GameEvent>,
     pub alive: bool,
     pub won: bool,
+    /// Last damage the player took, if any; the killing blow once the player dies.
+    pub last_damage: Option<LastDamage>,
     pub endless: bool,
     pub amulet_carried: bool,
     pub amulet_taken: bool,
@@ -94,6 +114,7 @@ impl Game {
             events: VecDeque::new(),
             alive: true,
             won: false,
+            last_damage: None,
             endless: false,
             amulet_carried: false,
             amulet_taken: false,
@@ -179,6 +200,15 @@ impl Game {
 
     pub fn log(&mut self, kind: crate::core::message::MessageKind, text: impl Into<String>) {
         self.messages.push(self.turn, kind, text);
+    }
+
+    /// Record damage the player just took. The last call before death is the
+    /// cause of death; call this from every player-damage path.
+    pub fn record_damage(&mut self, cause: DeathCause, source: Option<&str>) {
+        self.last_damage = Some(LastDamage {
+            cause,
+            source: source.map(|s| s.to_string()),
+        });
     }
 
     pub fn do_turn(&mut self, action: crate::core::action::Action) {
@@ -308,7 +338,11 @@ impl Game {
             let res2 = combat.monster_attacks(&self.monsters[idx], &self.player);
             if res2.hit {
                 let dmg = res2.damage;
+                let attacker = self.monsters[idx].name.clone();
                 self.player.hp = self.player.hp.saturating_sub(dmg);
+                if dmg > 0 {
+                    self.record_damage(DeathCause::Slain, Some(&attacker));
+                }
                 self.emit(GameEvent::Hit { crit: false });
                 self.log(
                     crate::core::message::MessageKind::Combat,
@@ -690,7 +724,11 @@ impl Game {
                             let res = combat.monster_attacks(&m2, &self.player);
                             if res.hit {
                                 let dmg = res.damage;
+                                let attacker = m2.name.clone();
                                 self.player.hp = self.player.hp.saturating_sub(dmg);
+                                if dmg > 0 {
+                                    self.record_damage(DeathCause::Slain, Some(&attacker));
+                                }
                                 self.log(
                                     crate::core::message::MessageKind::Combat,
                                     format!(
@@ -719,10 +757,24 @@ impl Game {
         if !has_sustenance {
             self.player.hunger = self.player.hunger.saturating_sub(1);
         }
+        let alive = self.player.hp > 0;
+        let poison = self.statuses.poison;
+        let disease = self.statuses.disease;
         {
             let mut statuses = self.statuses.clone();
             statuses.tick(&mut self.player);
             self.statuses = statuses;
+        }
+        if alive {
+            // Tick damage is applied in the order poison, disease, starvation;
+            // record the one dealt last.
+            if self.player.hunger == 0 {
+                self.record_damage(DeathCause::Starved, None);
+            } else if disease > 0 {
+                self.record_damage(DeathCause::Other, None);
+            } else if poison > 0 {
+                self.record_damage(DeathCause::Poisoned, None);
+            }
         }
         if self.player.hunger > 400 {
             self.player.ep = (self.player.ep + 1).min(self.player.max_ep);
@@ -795,6 +847,15 @@ impl Game {
 
     pub fn score_info(&self) -> ScoreInfo {
         let score = crate::core::score::compute(self);
+        let (cause, killed_by) = if self.won {
+            (DeathCause::Other, None)
+        } else {
+            let last = self.last_damage.clone();
+            (
+                last.as_ref().map(|d| d.cause).unwrap_or(DeathCause::Other),
+                last.and_then(|d| d.source),
+            )
+        };
         ScoreInfo {
             name: self.player.name.clone(),
             class: self.player.class.to_string(),
@@ -807,8 +868,9 @@ impl Game {
             turns: self.turn,
             seed: self.seed,
             won: self.won,
-            cause: DeathCause::Slain,
-            date: "1970-01-01".to_string(),
+            cause,
+            killed_by,
+            date: game_date(self.turn),
         }
     }
 }
@@ -935,6 +997,77 @@ mod tests {
             .iter()
             .any(|m| m.text == "You aren't wearing any armor."));
         assert!(all.iter().any(|m| m.text == "You aren't wearing a ring."));
+    }
+
+    #[test]
+    fn monster_kill_reports_slain_cause_and_killer_name() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let mut m = crate::entities::monster::Monster::new(
+            crate::data::monsters::MONSTERS[0].clone(),
+            (5, 5),
+        );
+        let m_name = m.name.clone();
+        m.hp = 255;
+        m.max_hp = 255;
+        m.def.attack = 200; // to-hit 250: always hits
+        m.def.damage_die = 20;
+        g.monsters.push(m);
+        g.player.hp = 1;
+        for _ in 0..200 {
+            if g.player.hp == 0 {
+                break;
+            }
+            g.monsters[0].hp = 255;
+            g.attack_monster(0);
+        }
+        assert_eq!(g.player.hp, 0, "the monster should have killed the player");
+        let info = g.score_info();
+        assert_eq!(info.cause, DeathCause::Slain);
+        assert_eq!(info.killed_by, Some(m_name));
+    }
+
+    #[test]
+    fn starving_death_reports_starved_cause() {
+        crate::tests_harness::with_isolated_data_dir("starved_death", || {
+            let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+            g.monsters.clear();
+            g.player.hp = 1;
+            g.player.hunger = 0;
+            g.do_turn(crate::core::action::Action::Wait);
+            assert!(!g.alive);
+            let info = g.score_info();
+            assert_eq!(info.cause, DeathCause::Starved);
+            assert_eq!(info.killed_by, None);
+            assert_eq!(info.date, "Day 1");
+        });
+    }
+
+    #[test]
+    fn poison_death_reports_poisoned_cause() {
+        crate::tests_harness::with_isolated_data_dir("poison_death", || {
+            let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+            g.monsters.clear();
+            g.player.hp = 1;
+            g.player.hunger = 500; // low enough that regen does not outpace poison
+            g.statuses.poison = 1;
+            g.do_turn(crate::core::action::Action::Wait);
+            assert!(!g.alive);
+            let info = g.score_info();
+            assert_eq!(info.cause, DeathCause::Poisoned);
+            assert_eq!(info.killed_by, None);
+        });
+    }
+
+    #[test]
+    fn score_date_is_derived_from_turns() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.turn = 0;
+        assert_eq!(g.score_info().date, "Day 1");
+        g.turn = 30;
+        assert_eq!(g.score_info().date, "Day 2");
+        g.turn = 299;
+        assert_eq!(g.score_info().date, "Day 10");
     }
 
     #[test]

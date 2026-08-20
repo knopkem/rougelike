@@ -51,6 +51,7 @@ pub fn save(hs: &Hiscore) {
 mod tests {
     use super::*;
     use crate::core::action::Action;
+    use crate::core::game::DeathCause;
     use crate::tests_harness::{new_game, with_isolated_data_dir};
 
     fn turn_and_load(game: &mut Game) -> Hiscore {
@@ -91,6 +92,25 @@ mod tests {
             assert!(game.won);
             assert_eq!(hs.entries.len(), 1);
             assert!(hs.entries[0].won);
+            assert_eq!(hs.entries[0].cause, DeathCause::Other);
+            assert_eq!(hs.entries[0].killed_by, None);
+        });
+    }
+
+    #[test]
+    fn death_entry_reports_true_cause_and_date() {
+        with_isolated_data_dir("death_cause", || {
+            let mut game = new_game(42);
+            game.monsters.clear();
+            game.player.hp = 1;
+            game.player.hunger = 0;
+            game.turn = 65;
+            let hs = turn_and_load(&mut game);
+            assert!(!game.alive);
+            assert_eq!(hs.entries.len(), 1);
+            assert_eq!(hs.entries[0].cause, DeathCause::Starved);
+            assert_eq!(hs.entries[0].killed_by, None);
+            assert_eq!(hs.entries[0].date, "Day 3");
         });
     }
 
