@@ -1,5 +1,12 @@
 # Deepdelve
 
+Note: This is an experience with local LLM (qwen3.8-27B) on minimal hardware: GPU with 16GB VRAM only.
+
+Baseline: IQ3-XXS model, q8_0 KV, 96K context
+
+
+## Overview
+
 A terminal roguelike written in Rust. Descend 25 floors of a procedurally
 generated dungeon, fight monsters, collect loot, and raise the
 **Amulet of the Abyss** to win.
