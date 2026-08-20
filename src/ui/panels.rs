@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use crate::core::game::Game;
+use crate::ui::picker::Picker;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Panel {
@@ -72,6 +73,32 @@ fn render_inventory(frame: &mut Frame, game: &Game, area: Rect) {
     frame.render_widget(list, rect);
 }
 
+pub fn render_picker(frame: &mut Frame, picker: &Picker, area: Rect) {
+    let rows: Vec<String> = picker
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let prefix = if i == picker.cursor { ">>" } else { "  " };
+            format!("{}{}", prefix, r.label)
+        })
+        .collect();
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|s| ListItem::new(s.as_str()).style(Style::default().fg(Color::White)))
+        .collect();
+    let h = rows.len() as u16 + 2;
+    let rect = center_rect(44, h.min(area.height.saturating_sub(2)).max(4), area);
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(picker.kind.prompt()),
+        );
+    frame.render_widget(list, rect);
+}
+
 fn render_character(frame: &mut Frame, game: &Game, area: Rect) {
     let p = &game.player;
     let lines = vec![
@@ -111,9 +138,14 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::from(Span::raw("  g : pick up item  (gold is picked up on walk)")),
         Line::from(Span::raw("  i : inventory   c : character  H : history")),
         Line::from(Span::raw("  ? : help          M : mute      q : quit (autosaves)")),
+        Line::from(Span::raw("  Items (arrow/jk to pick, Enter, Esc cancels):")),
+        Line::from(Span::raw("    U : use            V : quaff       E : eat")),
+        Line::from(Span::raw("    D : drop           W : wield       Y : wear")),
+        Line::from(Span::raw("    T : take off       P : ring on     O : ring off")),
+        Line::from(Span::raw("    R : read           I : identify")),
     ];
     let h = lines.len() as u16 + 2;
-    let rect = center_rect(50, h, area);
+    let rect = center_rect(54, h, area);
     let para = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)

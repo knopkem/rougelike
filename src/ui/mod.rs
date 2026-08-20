@@ -4,4 +4,5 @@ pub mod app;
 pub mod menu;
 pub mod palette;
 pub mod panels;
+pub mod picker;
 pub mod render;

@@ -27,6 +27,9 @@ fn main() -> io::Result<()> {
                     if let Some(panel) = &app.panel {
                         panels::render(f, game, panel);
                     }
+                    if let Some(picker) = &app.picker {
+                        panels::render_picker(f, picker, f.area());
+                    }
                 }
             }
             Screen::Death | Screen::Victory => {
