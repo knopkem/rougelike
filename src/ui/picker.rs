@@ -20,6 +20,7 @@ pub enum PickerKind {
     RingOff,
     Read,
     Identify,
+    Wand,
 }
 
 impl PickerKind {
@@ -37,6 +38,7 @@ impl PickerKind {
             PickerKind::RingOff => "Remove which ring?",
             PickerKind::Read => "Read which scroll?",
             PickerKind::Identify => "Identify which item?",
+            PickerKind::Wand => "Fire which wand?",
         }
     }
 
@@ -56,6 +58,9 @@ impl PickerKind {
             PickerKind::RingOff => Action::RingOff(slot - 2),
             PickerKind::Read => Action::Read(slot),
             PickerKind::Identify => Action::Identify(slot),
+            // Wand rows map to `UseItem`; the app intercepts the selection and
+            // switches to targeting mode instead of sending it to the core.
+            PickerKind::Wand => Action::UseItem(slot),
         }
     }
 }
@@ -129,6 +134,16 @@ impl Picker {
                     }
                 }
             }
+            PickerKind::Wand => {
+                for (i, item) in p.inventory.iter().enumerate() {
+                    if matches!(item.kind, ItemKind::Wand(_)) {
+                        rows.push(PickerRow {
+                            slot: i,
+                            label: format!("({}) {}", i, item.name()),
+                        });
+                    }
+                }
+            }
             _ => {
                 for (i, item) in p.inventory.iter().enumerate() {
                     rows.push(PickerRow {
@@ -183,7 +198,7 @@ mod tests {
     use crate::core::game::Game;
     use crate::items::catalog;
     use crate::items::item::{
-        ArmorKind, PotionKind, RingKind, ScrollKind, WeaponKind,
+        ArmorKind, PotionKind, RingKind, ScrollKind, WandKind, WeaponKind,
     };
 
     fn game_with(pick: fn(&mut Game)) -> Game {
@@ -256,6 +271,34 @@ mod tests {
         let g = game_with(|_| {});
         assert!(Picker::new(PickerKind::Drop, &g).is_none());
         assert!(Picker::new(PickerKind::Quaff, &g).is_none());
+    }
+
+    #[test]
+    fn wand_picker_lists_wands_only() {
+        let g = game_with(|g| {
+            add(g, catalog::make_potion(PotionKind::Healing(true)));
+            add(g, catalog::make_wand(WandKind::FireBolt, 0));
+            add(g, catalog::make_scroll(ScrollKind::Teleport));
+            add(g, catalog::make_wand(WandKind::Lightning, 0));
+        });
+        let mut picker = Picker::new(PickerKind::Wand, &g).unwrap();
+        // Only the two wands (indices 1 and 3) appear; slots are preserved.
+        assert_eq!(
+            picker.rows.iter().map(|r| r.slot).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        assert_eq!(picker.selected_action(), Some(Action::UseItem(1)));
+        picker.move_down();
+        assert_eq!(picker.selected_action(), Some(Action::UseItem(3)));
+    }
+
+    #[test]
+    fn wand_picker_without_wands_yields_no_picker() {
+        let g = game_with(|g| {
+            add(g, catalog::make_potion(PotionKind::Healing(true)));
+            add(g, catalog::make_scroll(ScrollKind::Teleport));
+        });
+        assert!(Picker::new(PickerKind::Wand, &g).is_none());
     }
 
     #[test]

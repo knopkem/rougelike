@@ -190,6 +190,8 @@ impl App {
             KeyCode::Char('O') => self.begin_picker(PickerKind::RingOff),
             KeyCode::Char('R') => self.begin_picker(PickerKind::Read),
             KeyCode::Char('I') => self.begin_picker(PickerKind::Identify),
+            // Wand picker: selecting a wand enters targeting mode.
+            KeyCode::Char('Z') => self.begin_picker(PickerKind::Wand),
             _ => None,
         }
     }
@@ -255,7 +257,7 @@ mod tests {
     #[test]
     fn new_bindings_open_the_right_picker() {
         let potion = catalog::make_potion(PotionKind::Healing(true));
-        let cases: [(KeyCode, PickerKind); 11] = [
+        let cases: [(KeyCode, PickerKind); 12] = [
             (KeyCode::Char('U'), PickerKind::Use),
             (KeyCode::Char('V'), PickerKind::Quaff),
             (KeyCode::Char('E'), PickerKind::Eat),
@@ -267,6 +269,7 @@ mod tests {
             (KeyCode::Char('O'), PickerKind::RingOff),
             (KeyCode::Char('R'), PickerKind::Read),
             (KeyCode::Char('I'), PickerKind::Identify),
+            (KeyCode::Char('Z'), PickerKind::Wand),
         ];
         for (code, kind) in cases {
             let mut app = app_with(
@@ -274,6 +277,7 @@ mod tests {
                     potion.clone(),
                     catalog::make_armor(ArmorKind::Plate, 0, false),
                     catalog::make_ring(RingKind::Protection),
+                    catalog::make_wand(WandKind::FireBolt, 0),
                 ],
                 Some((
                     catalog::make_weapon(
@@ -447,6 +451,73 @@ mod tests {
             app.handle_play_key(key(KeyCode::Enter)),
             Some(Action::UseItem(0))
         );
+        assert!(app.targeting.is_none());
+    }
+
+    #[test]
+    fn wand_key_opens_wand_filtered_picker() {
+        let items = vec![
+            catalog::make_potion(PotionKind::Healing(true)),
+            catalog::make_wand(WandKind::FireBolt, 0),
+            catalog::make_scroll(ScrollKind::Teleport),
+            catalog::make_wand(WandKind::Lightning, 0),
+        ];
+        let mut app = app_with(items, None);
+        assert_eq!(app.handle_play_key(key(KeyCode::Char('Z'))), None);
+        let slots: Vec<usize> = app
+            .picker
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .map(|r| r.slot)
+            .collect();
+        // Only the two wands (indices 1 and 3) are listed.
+        assert_eq!(slots, vec![1, 3]);
+    }
+
+    #[test]
+    fn wand_key_with_no_wands_opens_no_picker() {
+        let items = vec![
+            catalog::make_potion(PotionKind::Healing(true)),
+            catalog::make_scroll(ScrollKind::Teleport),
+        ];
+        let mut app = app_with(items, None);
+        assert_eq!(app.handle_play_key(key(KeyCode::Char('Z'))), None);
+        assert!(app.picker.is_none());
+    }
+
+    #[test]
+    fn wand_picker_enters_targeting_and_fires() {
+        let items = vec![
+            catalog::make_potion(PotionKind::Healing(true)),
+            catalog::make_wand(WandKind::FireBolt, 0),
+        ];
+        let mut app = app_with(items, None);
+        assert_eq!(app.handle_play_key(key(KeyCode::Char('Z'))), None);
+        // Move the cursor to the wand (index 1) and select it.
+        assert_eq!(app.handle_play_key(key(KeyCode::Char('j'))), None);
+        assert_eq!(app.handle_play_key(key(KeyCode::Enter)), None);
+        assert_eq!(app.targeting.as_ref().unwrap().wand_slot, 1);
+        // Aim and fire.
+        let (x, y) = (
+            app.targeting.as_ref().unwrap().x,
+            app.targeting.as_ref().unwrap().y,
+        );
+        assert_eq!(
+            app.handle_play_key(key(KeyCode::Enter)),
+            Some(Action::FireWand(1, x, y))
+        );
+        assert!(app.targeting.is_none());
+    }
+
+    #[test]
+    fn wand_picker_cancel_leaves_targeting_cleared() {
+        let items = vec![catalog::make_wand(WandKind::FireBolt, 0)];
+        let mut app = app_with(items, None);
+        assert_eq!(app.handle_play_key(key(KeyCode::Char('Z'))), None);
+        assert_eq!(app.handle_play_key(key(KeyCode::Esc)), None);
+        assert!(app.picker.is_none());
         assert!(app.targeting.is_none());
     }
 }

@@ -143,6 +143,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::from(Span::raw("    D : drop           W : wield       Y : wear")),
         Line::from(Span::raw("    T : take off       P : ring on     O : ring off")),
         Line::from(Span::raw("    R : read           I : identify")),
+        Line::from(Span::raw("    Z : fire wand      (arrows aim, Enter fires)")),
     ];
     let h = lines.len() as u16 + 2;
     let rect = center_rect(54, h, area);
