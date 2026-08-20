@@ -8,7 +8,7 @@ pub fn compute(game: &Game) -> u64 {
     score += game.player.xp as u64;
     score += (game.current_level as u64) * 100;
     score += game.player.kills as u64 * 10;
-    for q in &game.quests.completed {
+    for _ in &game.quests.completed {
         score += 500;
     }
     if game.won {

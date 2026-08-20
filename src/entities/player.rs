@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::rng::Rng;
 use crate::items::item::Item;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,7 +33,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(name: &str, race: &str, class: &str, rng: &mut Rng) -> Self {
+    pub fn new(name: &str, race: &str, class: &str) -> Self {
         let mut str = 8;
         let mut dex = 8;
         let mut con = 8;

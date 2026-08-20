@@ -7,7 +7,7 @@
 //! prefix.
 
 use rand::RngExt;
-use rand_core::{SeedableRng, TryRng};
+use rand_core::SeedableRng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use rand_chacha::ChaCha8Rng as ChaCha;
@@ -29,7 +29,6 @@ impl Serialize for Rng {
 
 impl<'de> Deserialize<'de> for Rng {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
         let (seed, inner) = <(u64, ChaCha)>::deserialize(d).map_err(|e: D::Error| e)?;
         Ok(Self { seed, inner })
     }

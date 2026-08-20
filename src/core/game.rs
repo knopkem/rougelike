@@ -6,14 +6,13 @@ use std::collections::VecDeque;
 
 use crate::core::events::GameEvent;
 use crate::core::message::MessageLog;
-use crate::core::rng::{Rng, RngLike};
+use crate::core::rng::Rng;
 use crate::entities::monster::Monster;
 use crate::entities::player::Player;
 use crate::items::item::Item;
-use crate::map::fov;
 use crate::map::gen;
-use crate::map::level::{Level, LevelTheme};
-use crate::quest::{Quest, QuestLog};
+use crate::map::level::Level;
+use crate::quest::QuestLog;
 use crate::status::Statuses;
 
 pub const MAX_LEVELS: u8 = 26;
@@ -83,23 +82,13 @@ pub struct Game {
     pub last_damage: Option<LastDamage>,
     pub endless: bool,
     pub amulet_carried: bool,
-    pub amulet_taken: bool,
-    pub tombstones: Vec<Tombstone>,
     pub spawn_timer: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tombstone {
-    pub level: u8,
-    pub x: u8,
-    pub y: u8,
-    pub text: String,
 }
 
 impl Game {
     pub fn new(seed: u64, name: &str, race: &str, class: &str) -> Self {
-        let mut rng = Rng::new(seed);
-        let player = Player::new(name, race, class, &mut rng);
+        let rng = Rng::new(seed);
+        let player = Player::new(name, race, class);
         let mut game = Game {
             seed,
             rng,
@@ -117,8 +106,6 @@ impl Game {
             last_damage: None,
             endless: false,
             amulet_carried: false,
-            amulet_taken: false,
-            tombstones: Vec::new(),
             spawn_timer: 0,
         };
         game.build_level(1);
@@ -375,7 +362,6 @@ impl Game {
             let drop = crate::items::loot::roll_drop(
                 &mut self.rng,
                 self.current_level,
-                m.def.rarity,
             );
             let pos = m.pos;
             self.current_mut().add_item(pos, drop);

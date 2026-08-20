@@ -31,7 +31,7 @@ pub fn maybe_drop(rng: &mut Rng, tier: u8) -> bool {
 }
 
 /// Roll a drop for a killed monster.
-pub fn roll_drop(rng: &mut Rng, depth: u8, rarity: Rarity) -> Item {
+pub fn roll_drop(rng: &mut Rng, depth: u8) -> Item {
     let roll = rng.int(0..100);
     if roll < 50 {
         catalog::random_weapon(rng, depth)

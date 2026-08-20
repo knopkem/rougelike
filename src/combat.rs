@@ -55,7 +55,7 @@ impl Combat {
                 crit: false,
             };
         }
-        let mut dmg = self.rng.int(1..m.def.damage_die as u64) as u8;
+        let dmg = self.rng.int(1..m.def.damage_die as u64) as u8;
         let ac = p.ac();
         let mut dmg = dmg.saturating_sub((ac / 2) as u8);
         let crit = self.rng.chance(5);
@@ -79,8 +79,8 @@ mod tests {
 
     #[test]
     fn player_can_hit() {
-        let mut rng = Rng::new(42);
-        let p = Player::new("T", "Human", "Warrior", &mut rng);
+        let rng = Rng::new(42);
+        let p = Player::new("T", "Human", "Warrior");
         let m = Monster::new(MONSTERS[0].clone(), (5, 5));
         let mut c = Combat::new(rng);
         let r = c.player_attacks(&p, &m);

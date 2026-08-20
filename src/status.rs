@@ -1,7 +1,6 @@
 //! Status effects + hunger states.
 
 use serde::{Deserialize, Serialize};
-use crate::core::game::Game;
 use crate::entities::player::Player;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

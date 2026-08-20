@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::data::classes::ClassId;
 use crate::data::races::RaceId;
-use crate::ui::app::{Creation, Screen};
+use crate::ui::app::Creation;
 
 pub fn render_title(frame: &mut Frame, has_save: bool) {
     let area = frame.area();

@@ -2,7 +2,6 @@
 
 use ratatui::{
      Frame,
-     buffer::Cell,
      layout::{Constraint, Direction, Layout, Rect},
      style::{Color, Style},
      text::{Line, Span},
@@ -10,7 +9,7 @@ use ratatui::{
  };
 
 use crate::core::game::Game;
-use crate::map::level::{Level, LevelTheme, MAP_H, MAP_W};
+use crate::map::level::{Level, MAP_H, MAP_W};
 use crate::ui::palette;
 
 /// Render the main play frame.

@@ -4,7 +4,6 @@ use crossterm::event::{self, KeyCode};
 use std::io;
 use std::time::Duration;
 
-use deepdelve::core::game::Game;
 use deepdelve::core::score;
 use deepdelve::save;
 use deepdelve::ui::app::{App, Screen};
