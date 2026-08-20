@@ -58,7 +58,7 @@ mod tests {
     // data dir is selected via the process-wide XDG_DATA_HOME variable.
     static LOCK: Mutex<()> = Mutex::new(());
 
-    fn isolated(name: &str, f: impl FnOnce()) {
+    fn with_isolated_data_dir(name: &str, f: impl FnOnce()) {
         let _guard = LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!(
             "deepdelve-test-{}-{}",
@@ -67,45 +67,52 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        let previous = std::env::var("XDG_DATA_HOME").ok();
         std::env::set_var("XDG_DATA_HOME", &dir);
         f();
+        match previous {
+            Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+            None => std::env::remove_var("XDG_DATA_HOME"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn turn_and_load(game: &mut Game) -> Hiscore {
+        game.monsters.clear();
+        game.do_turn(Action::Wait);
+        load()
     }
 
     #[test]
     fn in_progress_run_records_nothing() {
-        isolated("in_progress", || {
+        with_isolated_data_dir("in_progress", || {
             let mut game = new_game(42);
-            game.monsters.clear();
-            game.do_turn(Action::Wait);
+            let hs = turn_and_load(&mut game);
             assert!(game.alive && !game.won);
-            assert_eq!(load().entries.len(), 0);
+            assert_eq!(hs.entries.len(), 0);
         });
     }
 
     #[test]
     fn death_records_exactly_one_entry() {
-        isolated("death", || {
+        with_isolated_data_dir("death", || {
             let mut game = new_game(42);
-            game.monsters.clear();
             game.player.hunger = 0;
             game.player.hp = 0;
-            game.do_turn(Action::Wait);
+            let hs = turn_and_load(&mut game);
             assert!(!game.alive);
-            assert_eq!(load().entries.len(), 1);
+            assert_eq!(hs.entries.len(), 1);
         });
     }
 
     #[test]
     fn victory_records_exactly_one_entry() {
-        isolated("victory", || {
+        with_isolated_data_dir("victory", || {
             let mut game = new_game(42);
-            game.monsters.clear();
             game.amulet_carried = true;
             game.current_level = 25;
-            game.do_turn(Action::Wait);
+            let hs = turn_and_load(&mut game);
             assert!(game.won);
-            let hs = load();
             assert_eq!(hs.entries.len(), 1);
             assert!(hs.entries[0].won);
         });
@@ -113,16 +120,15 @@ mod tests {
 
     #[test]
     fn death_and_victory_same_turn_record_once() {
-        isolated("death_victory", || {
+        with_isolated_data_dir("death_victory", || {
             let mut game = new_game(42);
-            game.monsters.clear();
             game.player.hunger = 0;
             game.player.hp = 0;
             game.amulet_carried = true;
             game.current_level = 25;
-            game.do_turn(Action::Wait);
+            let hs = turn_and_load(&mut game);
             assert!(!game.alive);
-            assert_eq!(load().entries.len(), 1);
+            assert_eq!(hs.entries.len(), 1);
         });
     }
 }
