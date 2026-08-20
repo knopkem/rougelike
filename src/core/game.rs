@@ -739,7 +739,7 @@ impl Game {
     }
 
     fn check_victory(&mut self) {
-        if !self.won && self.amulet_carried && self.current_level >= 25 {
+        if self.alive && !self.won && self.amulet_carried && self.current_level >= 25 {
             self.won = true;
             self.emit(GameEvent::Victory);
             self.log(

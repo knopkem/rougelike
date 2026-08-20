@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use deepdelve::core::game::Game;
 use deepdelve::core::score;
-use deepdelve::hiscore;
 use deepdelve::save;
 use deepdelve::ui::app::{App, Screen};
 use deepdelve::ui::menu;
@@ -90,10 +89,8 @@ fn main() -> io::Result<()> {
                             game.do_turn(action);
                             if !game.alive {
                                 app.screen = Screen::Death;
-                                hiscore::record(game);
                             } else if game.won {
                                 app.screen = Screen::Victory;
-                                hiscore::record(game);
                             }
                             save::autosave(game);
                         }
