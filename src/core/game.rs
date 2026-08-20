@@ -483,9 +483,38 @@ impl Game {
         }
     }
 
-    fn take_off_item(&mut self, _slot: usize) {
-        if let Some(a) = self.player.armor.take() {
-            self.player.inventory.push(a);
+    /// Take off the equipment at the given *equipment slot*: 0 = wielded
+    /// weapon/shield, 1 = armor, 2+ = rings (2 = first ring, 3 = second, ...).
+    /// The removed item goes back into the inventory; an empty slot logs a
+    /// message instead. Matches the `Action::TakeOff(slot)` argument.
+    fn take_off_item(&mut self, slot: usize) {
+        match slot {
+            0 => match self.player.wielded.take() {
+                Some(w) => self.player.inventory.push(w),
+                None => self.log(
+                    crate::core::message::MessageKind::Normal,
+                    "You aren't wielding anything.",
+                ),
+            },
+            1 => match self.player.armor.take() {
+                Some(a) => self.player.inventory.push(a),
+                None => self.log(
+                    crate::core::message::MessageKind::Normal,
+                    "You aren't wearing any armor.",
+                ),
+            },
+            n => {
+                let ring = n - 2;
+                if ring < self.player.rings.len() {
+                    let r = self.player.rings.remove(ring);
+                    self.player.inventory.push(r);
+                } else {
+                    self.log(
+                        crate::core::message::MessageKind::Normal,
+                        "You aren't wearing a ring.",
+                    );
+                }
+            }
         }
     }
 
@@ -821,6 +850,91 @@ mod tests {
             .events
             .iter()
             .any(|e| matches!(e, GameEvent::LevelUp)));
+    }
+
+    fn game_equipped() -> Game {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        g.player.inventory.clear();
+        g.player.wielded = Some(crate::items::catalog::make_weapon(
+            crate::items::item::WeaponKind::Dagger,
+            0,
+            false,
+            &mut g.rng,
+        ));
+        g.player.armor = Some(crate::items::catalog::make_armor(
+            crate::items::item::ArmorKind::Chainmail,
+            0,
+            false,
+        ));
+        g.player
+            .rings
+            .push(crate::items::catalog::make_ring(
+                crate::items::item::RingKind::Protection,
+            ));
+        g.player
+            .rings
+            .push(crate::items::catalog::make_ring(
+                crate::items::item::RingKind::Energy,
+            ));
+        g
+    }
+
+    #[test]
+    fn take_off_worn_armor_moves_it_to_inventory() {
+        let mut g = game_equipped();
+        let armor = g.player.armor.clone().unwrap();
+        g.do_turn(crate::core::action::Action::TakeOff(1));
+        assert!(g.player.armor.is_none());
+        assert!(g.player.inventory.contains(&armor));
+    }
+
+    #[test]
+    fn take_off_worn_ring_removes_that_ring_not_the_armor() {
+        let mut g = game_equipped();
+        let armor = g.player.armor.clone().unwrap();
+        let first = g.player.rings[0].clone();
+        g.do_turn(crate::core::action::Action::TakeOff(2));
+        assert!(g
+            .player
+            .armor
+            .as_ref()
+            .map(|a| a == &armor)
+            .unwrap_or(false), "armor untouched");
+        assert_eq!(g.player.rings.len(), 1);
+        assert_eq!(
+            g.player.rings[0].kind,
+            crate::items::item::ItemKind::Ring(crate::items::item::RingKind::Energy)
+        );
+        assert!(g.player.inventory.contains(&first));
+    }
+
+    #[test]
+    fn take_off_wielded_weapon_moves_it_to_inventory() {
+        let mut g = game_equipped();
+        let weapon = g.player.wielded.clone().unwrap();
+        g.do_turn(crate::core::action::Action::TakeOff(0));
+        assert!(g.player.wielded.is_none());
+        assert!(g.player.inventory.contains(&weapon));
+    }
+
+    #[test]
+    fn take_off_empty_equipment_slot_logs_and_does_nothing() {
+        let mut g = game_equipped();
+        g.player.armor = None;
+        g.player.rings.clear();
+        let inventory = g.player.inventory.clone();
+        let messages = g.messages.all().len();
+        g.do_turn(crate::core::action::Action::TakeOff(1));
+        g.do_turn(crate::core::action::Action::TakeOff(2));
+        g.do_turn(crate::core::action::Action::TakeOff(99));
+        assert_eq!(g.player.inventory, inventory);
+        let all = g.messages.all();
+        assert!(all.len() >= messages + 3);
+        assert!(all
+            .iter()
+            .any(|m| m.text == "You aren't wearing any armor."));
+        assert!(all.iter().any(|m| m.text == "You aren't wearing a ring."));
     }
 
     #[test]

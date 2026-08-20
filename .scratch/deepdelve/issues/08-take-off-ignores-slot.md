@@ -30,10 +30,21 @@ and a clear message for anything that can't be taken off.
   ring's id
 
 **Acceptance criteria:**
-- [ ] Taking off worn armor removes the armor
-- [ ] Taking off a worn ring removes that ring, not the armor
-- [ ] Taking off a non-equipable slot state logs a sensible message
-- [ ] The action route and the function agree on what the slot argument means
+- [x] Taking off worn armor removes the armor
+- [x] Taking off a worn ring removes that ring, not the armor
+- [x] Taking off a non-equipable slot state logs a sensible message
+- [x] The action route and the function agree on what the slot argument means
+
+Implementation note (2026-08-20): `Action::TakeOff(slot)` and `Game::take_off_item(slot)`
+now both take an **equipment slot** — an index into a fixed virtual equipment list:
+`0` = wielded weapon/shield, `1` = armor, `2+` = rings (`2` = first ring, `3` = second,
+...). This matches the order equipment is displayed in the inventory panel and the
+existing `player.rings` index used by `Action::RingOff`. An inventory index was
+rejected because worn items are not in the inventory, so it could never address the
+equipped item. `take_off_item` branches on the slot, moves the item at that slot back
+into the inventory, and logs a message for empty slots ("You aren't wielding anything."
+/ "You aren't wearing any armor." / "You aren't wearing a ring."). No event is emitted,
+consistent with the existing `ring_off` path (no `Unequip` variant exists in `GameEvent`).
 
 **Out of scope:**
 - Re-equipping / swapping logic (Wear/Wield paths)

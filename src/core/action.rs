@@ -14,6 +14,8 @@ pub enum Action {
     Drop(usize),
     Wield(usize),
     Wear(usize),
+    /// Take off equipment at the given *equipment slot*: 0 = wielded
+    /// weapon/shield, 1 = armor, 2+ = rings (2 = first ring, 3 = second, ...).
     TakeOff(usize),
     RingOn(usize),
     RingOff(usize),
