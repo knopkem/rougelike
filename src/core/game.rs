@@ -318,7 +318,7 @@ impl Game {
 
     fn kill_monster(&mut self, idx: usize, how: &str) {
         let m = self.monsters[idx].clone();
-        let def = m.def.clone();
+        let tier = m.tier();
         let name = m.name.clone();
         self.player.kills += 1;
         let xp = m.xp;
@@ -327,9 +327,13 @@ impl Game {
             crate::core::message::MessageKind::Good,
             format!("{name} is {how} (+{xp} XP)"),
         );
-        self.emit(GameEvent::MonsterDeath { tier: def.tier });
-        if crate::items::loot::maybe_drop(&mut self.rng, def.tier) {
-            let drop = crate::items::loot::roll_drop(&mut self.rng, self.current_level, def.rarity);
+        self.emit(GameEvent::MonsterDeath { tier });
+        if crate::items::loot::maybe_drop(&mut self.rng, tier) {
+            let drop = crate::items::loot::roll_drop(
+                &mut self.rng,
+                self.current_level,
+                m.def.rarity,
+            );
             let pos = m.pos;
             self.current_mut().add_item(pos, drop);
             self.log(
@@ -339,7 +343,7 @@ impl Game {
         }
         {
             let mut quests = self.quests.clone();
-            quests.on_kill(self, &def);
+            quests.on_kill(self, &m.def);
             self.quests = quests;
         }
         self.monsters.remove(idx);

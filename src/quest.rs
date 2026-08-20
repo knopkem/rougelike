@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::core::game::Game;
-use crate::data::monsters::MonsterDef;
+use crate::entities::monster::MonsterDefData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuestStatus {
@@ -66,7 +66,7 @@ impl QuestLog {
         // Hook for quest progress checks.
     }
 
-    pub fn on_kill(&mut self, game: &mut Game, def: &MonsterDef) {
+    pub fn on_kill(&mut self, game: &mut Game, def: &MonsterDefData) {
         // Track kills for quest 2.
         if def.name.contains("Cultist") {
             if let Some(q) = self.quests.iter_mut().find(|q| q.id == 2) {

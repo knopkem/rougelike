@@ -27,9 +27,17 @@ and any flags survive a save/load round-trip.
 - Keep the existing `Serialize` impl consistent with the derived `Deserialize`
 
 **Acceptance criteria:**
-- [ ] A save→load round-trip preserves the full monster list (def, name, pos, hp)
-- [ ] No placeholder/`IgnoredAny` code remains in the monster deserialization path
-- [ ] `cargo check` passes with no new warnings (the `ignored` variable warning disappears)
+- [x] A save→load round-trip preserves the full monster list (def, name, pos, hp)
+- [x] No placeholder/`IgnoredAny` code remains in the monster deserialization path
+- [x] `cargo check` passes with no new warnings (the `ignored` variable warning disappears)
+
+Implementation note (2026-08-20): the derive could not be added directly —
+`MonsterDef.name` is `&'static str`, which does not deserialize from JSON
+(lifetime bound `'de: 'static`). `Monster.def` therefore holds a new
+`MonsterDefData` (owned `String` name) that `Serialize` writes in exactly the
+same shape as the derive would; `MonsterDef: Into<MonsterDefData>` covers the
+spawn path. `MonsterDef` also gained a `PartialEq` derive (used by the
+round-trip test).
 
 **Out of scope:**
 - Save file versioning/migration (no existing valid saves matter — the format was corrupting them anyway)

@@ -147,6 +147,53 @@ mod tests {
     }
 
     #[test]
+    fn save_load_preserves_monsters() {
+        with_isolated_data_dir("monster_roundtrip", || {
+            let game = new_game(9);
+            assert!(!game.monsters.is_empty(), "fresh game must have monsters");
+            let before: Vec<_> = game
+                .monsters
+                .iter()
+                .map(|m| {
+                    (
+                        m.def.clone(),
+                        m.name.clone(),
+                        m.pos,
+                        m.hp,
+                        m.max_hp,
+                        m.xp,
+                        m.dead,
+                        m.is_unique,
+                        m.is_boss,
+                        m.ability_cooldown,
+                    )
+                })
+                .collect();
+            autosave(&game);
+            let loaded = load_autosave().expect("autosave should load");
+            let after: Vec<_> = loaded
+                .monsters
+                .iter()
+                .map(|m| {
+                    (
+                        m.def.clone(),
+                        m.name.clone(),
+                        m.pos,
+                        m.hp,
+                        m.max_hp,
+                        m.xp,
+                        m.dead,
+                        m.is_unique,
+                        m.is_boss,
+                        m.ability_cooldown,
+                    )
+                })
+                .collect();
+            assert_eq!(before, after, "save/load must preserve the monster list");
+        });
+    }
+
+    #[test]
     fn death_turn_leaves_no_autosave() {
         with_isolated_data_dir("death_turn", || {
             let mut game = new_game(6);

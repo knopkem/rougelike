@@ -13,9 +13,57 @@ pub enum Rarity {
     Legendary,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MonsterDefData {
+    pub name: String,
+    pub glyph: char,
+    pub tier: u8,
+    pub rarity: Rarity,
+    pub hp: u8,
+    pub xp: u32,
+    pub damage_die: u8,
+    pub attack: u8,
+    pub ac: u8,
+    pub speed: u8,
+}
+
+impl From<MonsterDef> for MonsterDefData {
+    fn from(d: MonsterDef) -> Self {
+        Self {
+            name: d.name.to_string(),
+            glyph: d.glyph,
+            tier: d.tier,
+            rarity: d.rarity,
+            hp: d.hp,
+            xp: d.xp,
+            damage_die: d.damage_die,
+            attack: d.attack,
+            ac: d.ac,
+            speed: d.speed,
+        }
+    }
+}
+
+impl From<&MonsterDef> for MonsterDefData {
+    fn from(d: &MonsterDef) -> Self {
+        Self {
+            name: d.name.to_string(),
+            glyph: d.glyph,
+            tier: d.tier,
+            rarity: d.rarity,
+            hp: d.hp,
+            xp: d.xp,
+            damage_die: d.damage_die,
+            attack: d.attack,
+            ac: d.ac,
+            speed: d.speed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Monster {
-    pub def: MonsterDef,
+    pub def: MonsterDefData,
     pub name: String,
     pub pos: (u8, u8),
     pub hp: u8,
@@ -27,33 +75,13 @@ pub struct Monster {
     pub ability_cooldown: u8,
 }
 
-impl<'de> Deserialize<'de> for Monster {
-    fn deserialize<D: serde::de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::IgnoredAny;
-        let ignored = IgnoredAny::deserialize(d)?;
-        let def = crate::data::monsters::MONSTERS[0].clone();
-        Ok(Self {
-            def,
-            name: String::new(),
-            pos: (0, 0),
-            hp: 0,
-            max_hp: 0,
-            xp: 0,
-            dead: false,
-            is_unique: false,
-            is_boss: false,
-            ability_cooldown: 0,
-        })
-    }
-}
-
 impl Monster {
     pub fn new(def: MonsterDef, pos: (u8, u8)) -> Self {
         let max_hp = def.hp;
         let xp = def.xp;
         Self {
             name: def.name.to_string(),
-            def,
+            def: def.into(),
             pos,
             hp: max_hp,
             max_hp,
@@ -63,6 +91,12 @@ impl Monster {
             is_boss: false,
             ability_cooldown: 0,
         }
+    }
+}
+
+impl Monster {
+    pub fn tier(&self) -> u8 {
+        self.def.tier
     }
 }
 
@@ -78,7 +112,7 @@ pub fn spawn_monster(rng: &mut Rng, depth: u8, endless: bool) -> Monster {
         .copied()
         .unwrap_or(&crate::data::monsters::MONSTERS[0])
         .clone();
-    let mut m = Monster::new(def, (0, 0));
+    let mut m = Monster::new(def, (3, 3));
     if endless && depth > 25 {
         // Scale up.
         m.max_hp = (m.max_hp as u16 + (depth - 25) as u16 * 5) as u8;
@@ -95,6 +129,39 @@ pub fn spawn_monster(rng: &mut Rng, depth: u8, endless: bool) -> Monster {
         m.xp *= 3;
     }
     m
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::monsters::MONSTERS;
+
+    fn sample() -> Monster {
+        let mut m = Monster::new(MONSTERS[4].clone(), (12, 34));
+        m.name = "Foul hobgoblin".to_string();
+        m.hp = 4;
+        m.dead = true;
+        m.is_unique = true;
+        m.ability_cooldown = 3;
+        m
+    }
+
+    #[test]
+    fn monster_survives_json_roundtrip() {
+        let m = sample();
+        let json = serde_json::to_string(&m).unwrap();
+        let back: Monster = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.def, m.def);
+        assert_eq!(back.name, m.name);
+        assert_eq!(back.pos, m.pos);
+        assert_eq!(back.hp, m.hp);
+        assert_eq!(back.max_hp, m.max_hp);
+        assert_eq!(back.xp, m.xp);
+        assert_eq!(back.dead, m.dead);
+        assert_eq!(back.is_unique, m.is_unique);
+        assert_eq!(back.is_boss, m.is_boss);
+        assert_eq!(back.ability_cooldown, m.ability_cooldown);
+    }
 }
 
 fn tier_for_depth(depth: u8) -> u8 {

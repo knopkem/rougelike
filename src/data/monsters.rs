@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::entities::monster::Rarity;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MonsterDef {
     pub name: &'static str,
     pub glyph: char,
