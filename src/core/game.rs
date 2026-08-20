@@ -324,11 +324,18 @@ impl Game {
         let name = m.name.clone();
         self.player.kills += 1;
         let xp = m.xp;
-        self.player.xp += xp;
+        let leveled_up = self.player.gain_xp(xp);
         self.log(
             crate::core::message::MessageKind::Good,
             format!("{name} is {how} (+{xp} XP)"),
         );
+        if leveled_up {
+            self.log(
+                crate::core::message::MessageKind::Good,
+                format!("You are now level {}!", self.player.level),
+            );
+            self.emit(GameEvent::LevelUp);
+        }
         self.emit(GameEvent::MonsterDeath { tier });
         if crate::items::loot::maybe_drop(&mut self.rng, tier) {
             let drop = crate::items::loot::roll_drop(
@@ -774,5 +781,62 @@ impl Game {
             cause: DeathCause::Slain,
             date: "1970-01-01".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn game_with_kill() -> Game {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let mut m = crate::entities::monster::Monster::new(
+            crate::data::monsters::MONSTERS[0].clone(),
+            (5, 5),
+        );
+        m.xp = 5;
+        g.monsters.push(m);
+        g
+    }
+
+    #[test]
+    fn kill_crossing_threshold_levels_up() {
+        let mut g = game_with_kill();
+        let (max_hp_before, max_ep_before) = (g.player.max_hp, g.player.max_ep);
+        g.player.xp = 99;
+        g.player.hp = 10;
+        g.kill_monster(0, "slain");
+        assert_eq!(g.player.level, 2);
+        assert_eq!(g.player.xp, 4);
+        assert_eq!(g.player.max_hp, max_hp_before + 2);
+        assert_eq!(g.player.max_ep, max_ep_before + 2);
+        assert_eq!(g.player.hp, g.player.max_hp);
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "You are now level 2!"));
+        assert!(g
+            .events
+            .iter()
+            .any(|e| matches!(e, GameEvent::LevelUp)));
+    }
+
+    #[test]
+    fn kill_without_levelup_only_adds_xp() {
+        let mut g = game_with_kill();
+        let (max_hp_before, max_ep_before) = (g.player.max_hp, g.player.max_ep);
+        g.kill_monster(0, "slain");
+        assert_eq!(g.player.level, 1);
+        assert_eq!(g.player.xp, 5);
+        assert_eq!(g.player.max_hp, max_hp_before);
+        assert_eq!(g.player.max_ep, max_ep_before);
+        assert!(!g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text.starts_with("You are now level")));
+        assert!(g.drain_events().iter().all(|e| !matches!(e, GameEvent::LevelUp)));
     }
 }
