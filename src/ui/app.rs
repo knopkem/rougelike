@@ -1,5 +1,6 @@
 //! App state machine and input → Action mapping.
 
+use crate::audio::sfx::SfxEngine;
 use crate::core::action::Action;
 use crate::core::game::Game;
 use crate::data::classes::ClassId;
@@ -50,7 +51,7 @@ pub struct App {
     pub picker: Option<Picker>,
     pub targeting: Option<Targeting>,
     pub creation: Creation,
-    pub muted: bool,
+    pub sfx: SfxEngine,
     pub quit_requested: bool,
 }
 
@@ -63,7 +64,7 @@ impl App {
             picker: None,
             targeting: None,
             creation: Creation::default(),
-            muted: false,
+            sfx: SfxEngine::new(),
             quit_requested: false,
         }
     }
@@ -155,7 +156,7 @@ impl App {
                 return None;
             }
             KeyCode::Char('M') => {
-                self.muted = !self.muted;
+                self.sfx.toggle_mute();
                 return None;
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => {

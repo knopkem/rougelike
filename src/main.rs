@@ -94,6 +94,9 @@ fn main() -> io::Result<()> {
                             } else if game.won {
                                 app.screen = Screen::Victory;
                             }
+                            for ev in game.drain_events() {
+                                app.sfx.play_event(&ev);
+                            }
                             save::autosave(game);
                         }
                     }
