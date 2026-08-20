@@ -2905,3 +2905,63 @@ Done. Issue 07 fixed in `src/core/game.rs`:
 [0m→ [0mRead src/core/game.rs[90m [offset=520, limit=100][0m
 [0m→ [0mRead src/core/game.rs[90m [offset=620, limit=230][0m
 [0m→ [0mRead src/core/game.rs[90m [offset=1, limit=180][0m
+[0m→ [0mRead ISSUES.md
+[0m
+[0m$ [0mls -R /home/anonymous/projects/rougelike/.scratch/
+/home/anonymous/projects/rougelike/.scratch/:
+deepdelve
+implement-all.log
+
+/home/anonymous/projects/rougelike/.scratch/deepdelve:
+issues
+
+/home/anonymous/projects/rougelike/.scratch/deepdelve/issues:
+01-hiscore-double-record.md
+02-dead-autosave.md
+03-monster-deserialize-stub.md
+04-rng-resets-on-load.md
+05-spawn-monster-no-variety.md
+06-weapon-no-damage.md
+07-never-levels-up.md
+08-take-off-ignores-slot.md
+09-a-star-heap-inverted.md
+10-death-cause-hardcoded.md
+11-scrolls-potions-noop.md
+12-dead-code-warnings.md
+13-item-actions-unreachable.md
+14-wand-targeting-unreachable.md
+15-quests-never-progress.md
+16-shop-dead-code.md
+17-audio-dead-code.md
+18-statuses-no-effect.md
+19-monster-ai-gaps.md
+20-map-features-missing.md
+21-endless-mode-unimplemented.md
+22-main-rs-infra-gaps.md
+23-no-integration-tests-ci.md
+24-no-starting-kit.md
+[0m
+[0m→ [0mRead src/core/events.rs
+[0m✱ [0mGrep "GameEvent::|Equip"[90m in src/main.rs · 51 matches[0m
+[0m
+[0m$ [0mgit -C /home/anonymous/projects/rougelike log --oneline -8 && git -C /home/anonymous/projects/rougelike status
+220a3d2 implement all skill
+9b9162d Fix player never leveling up (issue 07)
+d6d8497 Randomize monster species within tier (issue 05)
+5e08b8f Fix RNG stream resetting on save/load (issue 04)
+367ec2c fix 3
+b146185 update readme
+e6c2a94 Address code review: dedup save test setup, fix harness comment (issue 02)
+142523a fix + update
+On branch master
+Your branch is up to date with 'origin/master'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   .scratch/implement-all.log
+
+no changes added to commit (use "git add" and/or "git commit -a")
+[0m
+[0m→ [0mRead .scratch/deepdelve/issues/07-never-levels-up.md
+[0m→ [0mRead .scratch/implement-all.log
