@@ -1,4 +1,4 @@
-# Deepdelve
+# Local LLM Game Dev
 
 Note: This is an experience with local LLM (qwen3.8-27B) on minimal hardware: GPU with 16GB VRAM only.
 
@@ -16,7 +16,7 @@ Harness:
 - opencode
 - mattpocock/skills
 
-## Overview
+## The Game
 
 A terminal roguelike written in Rust. Descend 25 floors of a procedurally
 generated dungeon, fight monsters, collect loot, and raise the

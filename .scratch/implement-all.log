@@ -2965,3 +2965,5 @@ no changes added to commit (use "git add" and/or "git commit -a")
 [0m
 [0m→ [0mRead .scratch/deepdelve/issues/07-never-levels-up.md
 [0m→ [0mRead .scratch/implement-all.log
+[0m→ [0mRead src/items/catalog.rs
+Now let me look at the items catalog to see how to construct test items:
