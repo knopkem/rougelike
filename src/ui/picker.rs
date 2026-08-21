@@ -306,7 +306,6 @@ mod tests {
                 WeaponKind::Dagger,
                 0,
                 false,
-                &mut g.rng,
             ));
             g.player.armor = Some(catalog::make_armor(ArmorKind::Chainmail, 0, false));
             g.player

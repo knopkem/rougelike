@@ -4,7 +4,7 @@ use crate::core::rng::Rng;
 use crate::entities::monster::Rarity;
 use crate::items::item::*;
 
-pub fn make_weapon(kind: WeaponKind, enchant: i8, cursed: bool, rng: &mut Rng) -> Item {
+pub fn make_weapon(kind: WeaponKind, enchant: i8, cursed: bool) -> Item {
     let (name, defense) = match kind {
         WeaponKind::Dagger => ("dagger", 1),
         WeaponKind::Shortsword => ("shortsword", 2),
@@ -19,7 +19,6 @@ pub fn make_weapon(kind: WeaponKind, enchant: i8, cursed: bool, rng: &mut Rng) -
         WeaponKind::MorningStar => ("morning star", 4),
         WeaponKind::WarFlail => ("war flail", 5),
     };
-    let _ = rng;
     Item {
         kind: ItemKind::Weapon(kind),
         name_str: name.to_string(),
@@ -33,6 +32,7 @@ pub fn make_weapon(kind: WeaponKind, enchant: i8, cursed: bool, rng: &mut Rng) -
 
 pub fn make_armor(kind: ArmorKind, enchant: i8, cursed: bool) -> Item {
     let (name, defense) = match kind {
+        ArmorKind::Leather => ("leather armor", 2),
         ArmorKind::Chainmail => ("chain mail", 3),
         ArmorKind::Plate => ("plate armor", 5),
         ArmorKind::LeatherHelm => ("leather helm", 1),
@@ -241,12 +241,13 @@ pub fn random_weapon(rng: &mut Rng, depth: u8) -> Item {
     let k = rng.pick(&kinds).unwrap_or(WeaponKind::Dagger);
     let enchant = (rng.int_inclusive(0..=3) as i8) + (depth / 8) as i8;
     let cursed = rng.chance(10);
-    make_weapon(k, enchant, cursed, rng)
+    make_weapon(k, enchant, cursed)
 }
 
 #[allow(dead_code)]
 pub fn random_armor(rng: &mut Rng, depth: u8) -> Item {
     let kinds = [
+        ArmorKind::Leather,
         ArmorKind::Chainmail,
         ArmorKind::Plate,
         ArmorKind::LeatherHelm,

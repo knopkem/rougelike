@@ -294,12 +294,7 @@ mod tests {
                     catalog::make_wand(WandKind::FireBolt, 0),
                 ],
                 Some((
-                    catalog::make_weapon(
-                        WeaponKind::Dagger,
-                        0,
-                        false,
-                        &mut crate::core::rng::Rng::new(1),
-                    ),
+                    catalog::make_weapon(WeaponKind::Dagger, 0, false),
                     catalog::make_armor(ArmorKind::Chainmail, 0, false),
                     vec![catalog::make_ring(RingKind::Protection)],
                 )),
@@ -394,12 +389,7 @@ mod tests {
 
     #[test]
     fn takeoff_picker_targets_equipment_slots() {
-        let w = catalog::make_weapon(
-            WeaponKind::Dagger,
-            0,
-            false,
-            &mut crate::core::rng::Rng::new(1),
-        );
+        let w = catalog::make_weapon(WeaponKind::Dagger, 0, false);
         let a = catalog::make_armor(ArmorKind::Chainmail, 0, false);
         let r1 = catalog::make_ring(RingKind::Protection);
         let r2 = catalog::make_ring(RingKind::Energy);
@@ -437,13 +427,8 @@ mod tests {
         let r2 = catalog::make_ring(RingKind::Energy);
         let mut app = app_with(
             vec![],
-            Some((
-                catalog::make_weapon(
-                    WeaponKind::Dagger,
-                    0,
-                    false,
-                    &mut crate::core::rng::Rng::new(1),
-                ),
+              Some((
+                catalog::make_weapon(WeaponKind::Dagger, 0, false),
                 catalog::make_armor(ArmorKind::Chainmail, 0, false),
                 vec![r1, r2],
             )),

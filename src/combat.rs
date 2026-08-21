@@ -108,7 +108,8 @@ mod tests {
     #[test]
     fn unarmed_player_rolls_1d4_damage() {
         let mut c = Combat::new(Rng::new(7));
-        let p = Player::new("T", "Human", "Warrior");
+        let mut p = Player::new("T", "Human", "Warrior");
+        p.wielded = None; // the warrior kit weapon is stowed for this test
         assert!(p.wielded.is_none());
         let m = Monster::new(MONSTERS[0].clone(), (5, 5)); // ac 1 -> subtracts 0
         let r = first_hit(&mut c, &p, &m);
@@ -125,8 +126,7 @@ mod tests {
     fn wielded_weapon_rolls_its_die_plus_enchant_bonus() {
         let mut c = Combat::new(Rng::new(7));
         let mut p = Player::new("T", "Human", "Warrior");
-        let mut rng = Rng::new(9);
-        let flail = make_weapon(WeaponKind::WarFlail, 10, false, &mut rng);
+        let flail = make_weapon(WeaponKind::WarFlail, 10, false);
         assert_eq!(flail.defense, 5, "war flail is a d5");
         p.wielded = Some(flail);
         let m = Monster::new(MONSTERS[0].clone(), (5, 5)); // ac 1 -> subtracts 0

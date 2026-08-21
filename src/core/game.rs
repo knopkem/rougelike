@@ -1158,7 +1158,6 @@ mod tests {
             crate::items::item::WeaponKind::Dagger,
             0,
             false,
-            &mut g.rng,
         ));
         g.player.armor = Some(crate::items::catalog::make_armor(
             crate::items::item::ArmorKind::Chainmail,

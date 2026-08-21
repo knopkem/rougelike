@@ -91,6 +91,15 @@ impl Player {
             _ => {}
         }
 
+        // Starting kit: class-appropriate weapon, armor and consumables.
+        let (wielded, armor, inventory) = match crate::data::classes::kit_for(class) {
+            Some(kit) => {
+                let (w, a, inv) = kit.equip();
+                (Some(w), Some(a), inv)
+            }
+            None => (None, None, Vec::new()),
+        };
+
         Self {
             name: name.to_string(),
             race: race.to_string(),
@@ -111,9 +120,9 @@ impl Player {
             int,
             wis,
             cha,
-            inventory: Vec::new(),
-            wielded: None,
-            armor: None,
+            inventory,
+            wielded,
+            armor,
             rings: Vec::new(),
         }
     }

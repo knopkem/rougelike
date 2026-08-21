@@ -609,12 +609,7 @@ mod tests {
     #[test]
     fn enchant_weapon_scroll_enchants_wielded_weapon() {
         let mut g = crate::tests_harness::new_game(42);
-        g.player.wielded = Some(make_weapon(
-            crate::items::item::WeaponKind::Dagger,
-            0,
-            false,
-            &mut g.rng,
-        ));
+        g.player.wielded = Some(make_weapon(crate::items::item::WeaponKind::Dagger, 0, false));
         apply_scroll(&mut g, ScrollKind::EnchantWeapon);
         assert_eq!(g.player.wielded.as_ref().unwrap().enchant, 1);
     }
