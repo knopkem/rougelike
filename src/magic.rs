@@ -8,6 +8,14 @@ use crate::items::item::{PotionKind, ScrollKind, WandKind};
 pub fn cast_wand(rng: &mut Rng, game: &mut Game, item: &Item, target: (u8, u8)) {
     match item.kind {
         crate::items::item::ItemKind::Wand(WandKind::FireBolt) => {
+            // A firebolt can scorch the caster.
+            if rng.chance(10) {
+                game.statuses.burn = 3;
+                game.log(
+                    crate::core::message::MessageKind::Bad,
+                    "The firebolt scorches your hand!",
+                );
+            }
             // Damage all monsters in a line from player to target.
             let p = game.player.pos;
             let mut x = p.0;
@@ -57,6 +65,86 @@ pub fn cast_wand(rng: &mut Rng, game: &mut Game, item: &Item, target: (u8, u8)) 
                     format!("{} falls asleep.", game.monsters[idx].name),
                 );
             }
+            if rng.chance(60) {
+                game.statuses.sleep = 6;
+                game.log(
+                    crate::core::message::MessageKind::Bad,
+                    "The drowsiness takes hold of you!",
+                );
+            }
+        }
+        crate::items::item::ItemKind::Wand(WandKind::Confusion) => {
+            if rng.chance(80) {
+                game.statuses.confusion = 8;
+                game.log(
+                    crate::core::message::MessageKind::Bad,
+                    "Your thoughts swirl in knots!",
+                );
+            } else if game.statuses.is_blessed() && rng.chance(50) {
+                game.log(
+                    crate::core::message::MessageKind::Good,
+                    "A blessing protects you.",
+                );
+            }
+        }
+        crate::items::item::ItemKind::Wand(WandKind::Paralyze) => {
+            if rng.chance(60) {
+                game.statuses.paralysis = 8;
+                game.log(
+                    crate::core::message::MessageKind::Bad,
+                    "Your limbs go rigid!",
+                );
+            } else if game.statuses.is_blessed() && rng.chance(50) {
+                game.log(
+                    crate::core::message::MessageKind::Good,
+                    "A blessing protects you.",
+                );
+            }
+        }
+        crate::items::item::ItemKind::Wand(WandKind::CurePoison) => {
+            game.statuses.poison = 0;
+            game.log(
+                crate::core::message::MessageKind::Good,
+                "The poison fades.",
+            );
+        }
+        crate::items::item::ItemKind::Wand(WandKind::Blink) => {
+            // The player is briefly turned to stone as reality reassembles.
+            if rng.chance(if game.statuses.is_blessed() { 10 } else { 30 }) {
+                game.statuses.petrification = 3;
+                game.log(
+                    crate::core::message::MessageKind::Bad,
+                    "You flash of stone as reality reassembles!",
+                );
+            }
+        }
+        crate::items::item::ItemKind::Wand(WandKind::Lightning) => {
+            if let Some(idx) = game
+                .monsters
+                .iter()
+                .position(|m| m.pos == target && !m.dead)
+            {
+                let dmg = rng.int(4..10) as u8;
+                game.monsters[idx].hp = game.monsters[idx].hp.saturating_sub(dmg);
+                if game.monsters[idx].hp == 0 {
+                    game.log(
+                        crate::core::message::MessageKind::Combat,
+                        format!("The lightning strikes {}!", game.monsters[idx].name),
+                    );
+                }
+            } else {
+                game.log(
+                    crate::core::message::MessageKind::Normal,
+                    "The lightning fizzles out.",
+                );
+            }
+            if rng.chance(if game.statuses.is_blessed() { 10 } else { 50 }) {
+                game.statuses.burn = 4;
+                game.log(
+                    crate::core::message::MessageKind::Bad,
+                    "The bolt backfires; your skin smolders!",
+                );
+            }
         }
         _ => {
             game.log(
@@ -79,6 +167,7 @@ pub fn apply_potion(game: &mut Game, kind: PotionKind) {
         }
         PotionKind::CurePoison => {
             game.statuses.poison = 0;
+            game.statuses.disease = 0;
             game.log(
                 crate::core::message::MessageKind::Good,
                 "The poison fades.",
@@ -90,12 +179,23 @@ pub fn apply_potion(game: &mut Game, kind: PotionKind) {
                 crate::core::message::MessageKind::Good,
                 "You feel a surge of energy.",
             );
+            if game.rng.chance(50) {
+                game.statuses.blessed = 10;
+                game.log(
+                    crate::core::message::MessageKind::Good,
+                    "You feel a blessing upon you.",
+                );
+            }
         }
         PotionKind::Restore => {
             game.statuses.poison = 0;
             game.statuses.disease = 0;
+            game.statuses.sickness = 0;
             game.statuses.confusion = 0;
             game.statuses.paralysis = 0;
+            game.statuses.petrification = 0;
+            game.statuses.burn = 0;
+            game.statuses.slow = 0;
             game.log(
                 crate::core::message::MessageKind::Good,
                 "You feel restored.",
@@ -152,6 +252,13 @@ pub fn apply_potion(game: &mut Game, kind: PotionKind) {
                     format!("Your body shifts. ({label} -1)"),
                 );
             }
+            if game.rng.chance(25) {
+                game.statuses.sickness = 5;
+                game.log(
+                    crate::core::message::MessageKind::Bad,
+                    "Your body feels sick.",
+                );
+            }
         }
     }
 }
@@ -176,6 +283,17 @@ pub fn apply_scroll(game: &mut Game, kind: ScrollKind) {
                         crate::core::message::MessageKind::Normal,
                         "You blink out of reality!",
                     );
+                    if game.rng.chance(if game.statuses.is_blessed() {
+                        8
+                    } else {
+                        20
+                    }) {
+                        game.statuses.petrification = 3;
+                        game.log(
+                            crate::core::message::MessageKind::Bad,
+                            "You flash of stone for a moment!",
+                        );
+                    }
                 }
                 None => game.log(
                     crate::core::message::MessageKind::Normal,
@@ -295,6 +413,21 @@ pub fn apply_scroll(game: &mut Game, kind: ScrollKind) {
                     crate::core::message::MessageKind::Normal,
                     "The monsters nearby cower in fear.",
                 );
+            }
+            // The fear saps your own strength.
+            if game.rng.chance(50) {
+                if game.statuses.is_blessed() && game.rng.chance(50) {
+                    game.log(
+                        crate::core::message::MessageKind::Good,
+                        "A blessing protects you.",
+                    );
+                } else {
+                    game.statuses.slow = 6;
+                    game.log(
+                        crate::core::message::MessageKind::Bad,
+                        "Your legs feel heavy.",
+                    );
+                }
             }
         }
     }

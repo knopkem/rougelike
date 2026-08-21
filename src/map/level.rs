@@ -119,7 +119,7 @@ impl Level {
 
     pub fn is_walkable(&self, pos: (u8, u8)) -> bool {
         match self.tile_at(pos) {
-            Tile::Floor | Tile::StairsUp | Tile::StairsDown | Tile::DoorClosed | Tile::Water | Tile::Lava => true,
+            Tile::Floor | Tile::StairsUp | Tile::StairsDown | Tile::DoorClosed | Tile::Water | Tile::Lava | Tile::SporeGas => true,
             _ => false,
         }
     }

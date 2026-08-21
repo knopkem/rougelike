@@ -212,6 +212,36 @@ impl Game {
     }
 
     fn player_turn(&mut self, action: crate::core::action::Action) {
+        // Status lockouts: the player cannot act, but the turn still passes.
+        if self.statuses.is_paralyzed() {
+            self.log(
+                crate::core::message::MessageKind::Bad,
+                "You are paralyzed!",
+            );
+            return;
+        }
+        if self.statuses.is_petrified() {
+            self.log(
+                crate::core::message::MessageKind::Bad,
+                "You are turned to stone!",
+            );
+            return;
+        }
+        if self.statuses.is_asleep() {
+            self.log(
+                crate::core::message::MessageKind::Bad,
+                "You are fast asleep.",
+            );
+            return;
+        }
+        if self.statuses.is_slowed() && self.turn % 2 == 1 {
+            self.log(
+                crate::core::message::MessageKind::Normal,
+                "You are too slow to act.",
+            );
+            return;
+        }
+        let action = self.derange_if_confused(action);
         match action {
             crate::core::action::Action::Move(dx, dy) => {
                 self.try_move(dx, dy);
@@ -253,6 +283,53 @@ impl Game {
         }
     }
 
+    /// While confused, a move may be deranged into a random direction.
+    /// Bump-moves (the target tile holds a monster) are never deranged.
+    fn derange_if_confused(
+        &mut self,
+        action: crate::core::action::Action,
+    ) -> crate::core::action::Action {
+        let crate::core::action::Action::Move(dx, dy) = action else {
+            return action;
+        };
+        if !self.statuses.is_confused() {
+            return action;
+        }
+        let target = (
+            (self.player.pos.0 as i32 + dx) as u8,
+            (self.player.pos.1 as i32 + dy) as u8,
+        );
+        if self.monsters.iter().any(|m| m.pos == target && !m.dead) {
+            return action;
+        }
+        if !self.rng.chance(50) {
+            return action;
+        }
+        if self.statuses.is_blessed() && self.rng.chance(50) {
+            self.log(
+                crate::core::message::MessageKind::Good,
+                "A blessing protects you.",
+            );
+            return action;
+        }
+        self.log(
+            crate::core::message::MessageKind::Bad,
+            "Your vision blurs; you stumble in a random direction.",
+        );
+        let dirs: [(i32, i32); 8] = [
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+            (-1, 0),
+            (1, 0),
+            (-1, 1),
+            (0, 1),
+            (1, 1),
+        ];
+        let (ndx, ndy) = dirs[self.rng.int(0..8) as usize];
+        crate::core::action::Action::Move(ndx, ndy)
+    }
+
     fn try_move(&mut self, dx: i32, dy: i32) -> bool {
         let (px, py) = (self.player.pos.0, self.player.pos.1);
         let nx = (px as i32 + dx) as u8;
@@ -272,6 +349,15 @@ impl Game {
         }
         self.player.pos = np;
         self.emit(GameEvent::Footstep);
+        if self.current().tile_at(np) == crate::map::level::Tile::SporeGas
+            && self.rng.chance(25)
+        {
+            self.statuses.poison = 5;
+            self.log(
+                crate::core::message::MessageKind::Bad,
+                "Spore gas billows into your lungs!",
+            );
+        }
         if let Some(gold) = self.current_mut().take_gold_at(np) {
             self.player.gold += gold;
             self.emit(GameEvent::Coin);
@@ -292,7 +378,10 @@ impl Game {
         let combat_rng = self.rng.clone();
         let mut combat = crate::combat::Combat::new(combat_rng);
         let m_name = self.monsters[idx].name.clone();
-        let res = combat.player_attacks(&self.player, &self.monsters[idx]);
+        let penalty = self
+            .statuses
+            .hunger_to_hit_penalty(self.player.hunger);
+        let res = combat.player_attacks(&self.player, &self.monsters[idx], penalty);
         if res.hit {
             self.emit(GameEvent::Hit { crit: res.crit });
             let dmg = res.damage;
@@ -577,6 +666,18 @@ impl Game {
                 crate::core::message::MessageKind::Normal,
                 format!("You eat the {}.", item.name()),
             );
+            // Wild mushrooms are a gamble.
+            if matches!(
+                item.kind,
+                crate::items::item::ItemKind::Food(crate::items::item::FoodKind::Mushroom)
+            ) && self.rng.chance(50)
+            {
+                self.statuses.poison = 5;
+                self.log(
+                    crate::core::message::MessageKind::Bad,
+                    "The mushroom was bad! You feel poisoned.",
+                );
+            }
         }
     }
 
@@ -656,6 +757,7 @@ impl Game {
     }
 
       fn monster_turns(&mut self) {
+        let player_invisible = self.statuses.is_invisible();
         let mut i = 0;
         while i < self.monsters.len() {
             let m = self.monsters[i].clone();
@@ -665,6 +767,7 @@ impl Game {
                     self.current(),
                     self.player.pos,
                     &self.monsters,
+                    player_invisible,
                 );
                 crate::entities::ai::act(&mut rng, &mut ai_game, &m)
             };
@@ -722,22 +825,17 @@ impl Game {
             self.player.hunger = self.player.hunger.saturating_sub(1);
         }
         let alive = self.player.hp > 0;
-        let poison = self.statuses.poison;
-        let disease = self.statuses.disease;
-        {
+        let death_cause = {
             let mut statuses = self.statuses.clone();
-            statuses.tick(&mut self.player);
+            let cause = statuses.tick(&mut self.player);
             self.statuses = statuses;
-        }
+            cause
+        };
         if alive {
-            // Tick damage is applied in the order poison, disease, starvation;
-            // record the one dealt last.
-            if self.player.hunger == 0 {
-                self.record_damage(DeathCause::Starved, None);
-            } else if disease > 0 {
-                self.record_damage(DeathCause::Other, None);
-            } else if poison > 0 {
-                self.record_damage(DeathCause::Poisoned, None);
+            // The status tick reports the last damage it dealt; that is the
+            // cause of death if HP hit 0 this turn.
+            if let Some(cause) = death_cause {
+                self.record_damage(cause, None);
             }
         }
         if self.player.hunger > 400 {
@@ -1013,7 +1111,7 @@ mod tests {
             let mut g = Game::new_test("Test", "Human", "Warrior", 42);
             g.monsters.clear();
             g.player.hp = 1;
-            g.player.hunger = 500; // low enough that regen does not outpace poison
+            g.player.hunger = 300; // hungry (not well-fed) so no regen outpaces poison
             g.statuses.poison = 1;
             g.do_turn(crate::core::action::Action::Wait);
             assert!(!g.alive);
@@ -1049,5 +1147,184 @@ mod tests {
             .iter()
             .any(|m| m.text.starts_with("You are now level")));
         assert!(g.drain_events().iter().all(|e| !matches!(e, GameEvent::LevelUp)));
+    }
+
+    fn walkable_dir(g: &Game) -> (i32, i32) {
+        let (px, py) = g.player.pos;
+        for (dx, dy) in [(1i32, 0), (0, 1), (-1, 0), (0, -1)] {
+            let nx = px as i32 + dx;
+            let ny = py as i32 + dy;
+            if crate::map::level::Level::in_bounds(nx as u8, ny as u8)
+                && g.current().is_walkable((nx as u8, ny as u8))
+            {
+                return (dx, dy);
+            }
+        }
+        panic!("no walkable tile adjacent to the player");
+    }
+
+    #[test]
+    fn paralyzed_player_cannot_act() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        g.statuses.paralysis = 5;
+        let start = g.player.pos;
+        let before = g.turn;
+        g.do_turn(crate::core::action::Action::Move(1, 0));
+        assert_eq!(g.player.pos, start, "paralysis must block movement");
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "You are paralyzed!"));
+        assert_eq!(g.turn, before + 1, "the turn still passes");
+        assert!(g.alive);
+    }
+
+    #[test]
+    fn petrified_and_asleep_players_cannot_act() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let start = g.player.pos;
+        g.statuses.petrification = 3;
+        g.do_turn(crate::core::action::Action::Move(1, 0));
+        assert_eq!(g.player.pos, start);
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "You are turned to stone!"));
+
+        let mut g2 = Game::new_test("Test", "Human", "Warrior", 7);
+        g2.monsters.clear();
+        let start2 = g2.player.pos;
+        g2.statuses.sleep = 3;
+        g2.do_turn(crate::core::action::Action::Pickup);
+        assert_eq!(g2.player.pos, start2);
+        assert!(g2
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "You are fast asleep."));
+    }
+
+    #[test]
+    fn slowed_player_skips_every_other_turn() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        g.statuses.slow = 10;
+        let (dx, dy) = walkable_dir(&g);
+        let start = g.player.pos;
+        g.turn = 1; // odd turn: skipped
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert_eq!(g.player.pos, start);
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "You are too slow to act."));
+        let (dx2, dy2) = walkable_dir(&g);
+        g.turn = 2; // even turn: the move goes through
+        g.do_turn(crate::core::action::Action::Move(dx2, dy2));
+        assert_ne!(
+            g.player.pos, start,
+            "the move must land on the even turn"
+        );
+    }
+
+    #[test]
+    fn confusion_deranges_open_moves_but_not_bumps_or_waits() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        g.statuses.confusion = 8;
+        // Non-move actions are never deranged.
+        assert_eq!(
+            g.derange_if_confused(crate::core::action::Action::Wait),
+            crate::core::action::Action::Wait
+        );
+        // Bump-moves (a monster on the target tile) are never deranged.
+        let (px, py) = g.player.pos;
+        let bump = (px + 1, py);
+        let m = crate::entities::monster::Monster::new(
+            crate::data::monsters::MONSTERS[0].clone(),
+            bump,
+        );
+        g.monsters.push(m);
+        assert_eq!(
+            g.derange_if_confused(crate::core::action::Action::Move(1, 0)),
+            crate::core::action::Action::Move(1, 0)
+        );
+        g.monsters.clear();
+        // Open moves stay moves but are redirected: over enough rolls the
+        // direction must change at least once.
+        let mut deranged = false;
+        for _ in 0..100 {
+            if let crate::core::action::Action::Move(ndx, ndy) =
+                g.derange_if_confused(crate::core::action::Action::Move(1, 0))
+            {
+                if (ndx, ndy) != (1, 0) {
+                    deranged = true;
+                    break;
+                }
+            } else {
+                panic!("confusion must never block a move, only redirect it");
+            }
+        }
+        assert!(deranged, "a confused player's moves must sometimes derange");
+    }
+
+    #[test]
+    fn spore_gas_tile_can_poison_the_player() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut().set_tile(np, crate::map::level::Tile::SporeGas);
+        for _ in 0..200 {
+            if g.statuses.poison > 0 {
+                break;
+            }
+            g.try_move(dx, dy);
+            g.try_move(-dx, -dy);
+        }
+        assert!(
+            g.statuses.poison > 0,
+            "stepping into spore gas must sometimes poison the player"
+        );
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "Spore gas billows into your lungs!"));
+    }
+
+    #[test]
+    fn bad_mushroom_can_poison_the_player() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        g.player.inventory.push(crate::items::catalog::make_food(
+            crate::items::item::FoodKind::Mushroom,
+        ));
+        for _ in 0..200 {
+            if g.statuses.poison > 0 {
+                break;
+            }
+            g.player
+                .inventory
+                .push(crate::items::catalog::make_food(
+                    crate::items::item::FoodKind::Mushroom,
+                ));
+            g.eat_item(g.player.inventory.len() - 1);
+        }
+        assert!(
+            g.statuses.poison > 0,
+            "a bad mushroom must sometimes poison the player"
+        );
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text == "The mushroom was bad! You feel poisoned."));
     }
 }

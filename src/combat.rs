@@ -19,8 +19,13 @@ impl Combat {
         Self { rng }
     }
 
-    pub fn player_attacks(&mut self, p: &Player, m: &Monster) -> HitResult {
-        let to_hit = p.to_hit();
+    pub fn player_attacks(
+        &mut self,
+        p: &Player,
+        m: &Monster,
+        to_hit_penalty: u64,
+    ) -> HitResult {
+        let to_hit = p.to_hit().saturating_sub(to_hit_penalty);
         let roll = self.rng.int(0..100);
         let hit = roll < to_hit;
         if !hit {
@@ -99,13 +104,13 @@ mod tests {
         let p = Player::new("T", "Human", "Warrior");
         let m = Monster::new(MONSTERS[0].clone(), (5, 5));
         let mut c = Combat::new(rng);
-        let r = c.player_attacks(&p, &m);
+        let r = c.player_attacks(&p, &m, 0);
         assert!(r.hit || !r.hit);
     }
 
     fn first_hit(c: &mut Combat, p: &Player, m: &Monster) -> HitResult {
         for _ in 0..1000 {
-            let r = c.player_attacks(p, m);
+            let r = c.player_attacks(p, m, 0);
             if r.hit {
                 return r;
             }
@@ -140,7 +145,7 @@ mod tests {
         let m = Monster::new(MONSTERS[0].clone(), (5, 5)); // ac 1 -> subtracts 0
         let mut saw_max_die = false;
         for _ in 0..500 {
-            let r = c.player_attacks(&p, &m);
+            let r = c.player_attacks(&p, &m, 0);
             if !r.hit {
                 continue;
             }

@@ -63,7 +63,9 @@ fn set_seen(level: &mut Level, x: i32, y: i32) {
 }
 
 /// Bresenham line of sight between two points (inclusive of endpoints).
-fn line_of_sight(level: &Level, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
+/// An invisible player can still be seen on direct line of sight, so the
+/// monster AI consults this as the invisibility seam.
+pub fn line_of_sight(level: &Level, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
     let dx = (x1 - x0).abs();
     let dy = (y1 - y0).abs();
     let sx = if x0 < x1 { 1 } else { -1 };
