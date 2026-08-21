@@ -1,12 +1,12 @@
 //! Rendering: main frame, viewport, bars, status, messages.
 
 use ratatui::{
-     Frame,
-     layout::{Constraint, Direction, Layout, Rect},
-     style::{Color, Style},
-     text::{Line, Span},
-     widgets::{Gauge, Paragraph},
- };
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{Gauge, Paragraph},
+    Frame,
+};
 
 use crate::core::game::Game;
 use crate::map::level::{Level, MAP_H, MAP_W};
@@ -57,12 +57,12 @@ fn render_viewport(frame: &mut Frame, game: &Game, area: Rect) {
                     crate::map::level::Tile::StairsDown => (">", Color::Yellow, !seen),
                     crate::map::level::Tile::StairsUp => ("<", Color::Yellow, !seen),
                     crate::map::level::Tile::Water => ("~", Color::Blue, !seen),
-                    crate::map::level::Tile::Lava => (
-                        "*",
-                        Color::LightRed,
-                        !seen,
-                    ),
-                    _ => (".", Color::Gray, !seen),
+                    crate::map::level::Tile::Lava => ("*", Color::LightRed, !seen),
+                    crate::map::level::Tile::SporeGas => (":", Color::LightGreen, !seen),
+                    crate::map::level::Tile::DoorClosed => ("+", Color::Yellow, !seen),
+                    crate::map::level::Tile::DoorLocked => ("&", Color::Yellow, !seen),
+                    crate::map::level::Tile::Grate => (":", Color::Gray, !seen),
+                    crate::map::level::Tile::Trap(_) => ("^", Color::Red, !seen),
                 }
             };
             let style = if dim {
@@ -76,10 +76,11 @@ fn render_viewport(frame: &mut Frame, game: &Game, area: Rect) {
 
     // Monsters in FOV.
     for m in &game.monsters {
-          if level.seen[Level::pos_idx(m.pos)] {
+        if level.seen[Level::pos_idx(m.pos)] {
             let style = Style::default().fg(Color::LightRed);
             let glyph = m.def.glyph.to_string();
-            frame.buffer_mut()
+            frame
+                .buffer_mut()
                 .set_string(ox + m.pos.0 as u16, oy + m.pos.1 as u16, glyph, style);
         }
     }
@@ -90,7 +91,8 @@ fn render_viewport(frame: &mut Frame, game: &Game, area: Rect) {
         let y = (*i / MAP_W as usize) as u8;
         if level.seen[Level::pos_idx((x, y))] && (x, y) != game.player.pos {
             let style = Style::default().fg(Color::Yellow);
-            frame.buffer_mut()
+            frame
+                .buffer_mut()
                 .set_string(ox + x as u16, oy + y as u16, "$", style);
         }
     }
@@ -99,19 +101,12 @@ fn render_viewport(frame: &mut Frame, game: &Game, area: Rect) {
     for (i, items) in &level.items {
         let x = (*i % MAP_W as usize) as u8;
         let y = (*i / MAP_W as usize) as u8;
-        if level.seen[Level::pos_idx((x, y))]
-            && !items.is_empty()
-            && (x, y) != game.player.pos
-        {
+        if level.seen[Level::pos_idx((x, y))] && !items.is_empty() && (x, y) != game.player.pos {
             let glyph = items.first().map(|it| it.glyph()).unwrap_or('?');
             let style = Style::default().fg(Color::Cyan);
-            frame.buffer_mut()
-                .set_string(
-                    ox + x as u16,
-                    oy + y as u16,
-                    glyph.to_string(),
-                    style,
-                );
+            frame
+                .buffer_mut()
+                .set_string(ox + x as u16, oy + y as u16, glyph.to_string(), style);
         }
     }
 }
@@ -141,7 +136,7 @@ fn render_status(frame: &mut Frame, game: &Game, area: Rect) {
     let hp_gauge = Gauge::default()
         .ratio(hp_pct / 100.0)
         .gauge_style(Style::default().fg(Color::White).bg(hp_color))
-         .label(format!("HP {}/{}", p.hp, p.max_hp));
+        .label(format!("HP {}/{}", p.hp, p.max_hp));
     frame.render_widget(hp_gauge, hp_area);
 
     // EP gauge.

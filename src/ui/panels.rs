@@ -1,11 +1,11 @@
 //! Overlay panels: inventory, character, help, history.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
+    Frame,
 };
 
 use crate::core::game::Game;
@@ -89,13 +89,12 @@ pub fn render_picker(frame: &mut Frame, picker: &Picker, area: Rect) {
         .collect();
     let h = rows.len() as u16 + 2;
     let rect = center_rect(44, h.min(area.height.saturating_sub(2)).max(4), area);
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
-                .title(picker.kind.prompt()),
-        );
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(picker.kind.prompt()),
+    );
     frame.render_widget(list, rect);
 }
 
@@ -137,13 +136,25 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::from(Span::raw("  . : wait          > : descend   < : ascend")),
         Line::from(Span::raw("  g : pick up item  (gold is picked up on walk)")),
         Line::from(Span::raw("  i : inventory   c : character  H : history")),
-        Line::from(Span::raw("  ? : help          M : mute      q : quit (autosaves)")),
+        Line::from(Span::raw(
+            "  ? : help          M : mute      q : quit (autosaves)",
+        )),
+        Line::from(Span::raw(
+            "  Bumping a door opens it; locked doors need a key.",
+        )),
+        Line::from(Span::raw(
+            "  Tiles: ~ water (slow)  * lava (dmg)  : spores  ^ trap",
+        )),
         Line::from(Span::raw("  Items (arrow/jk to pick, Enter, Esc cancels):")),
         Line::from(Span::raw("    U : use            V : quaff       E : eat")),
         Line::from(Span::raw("    D : drop           W : wield       Y : wear")),
-        Line::from(Span::raw("    T : take off       P : ring on     O : ring off")),
+        Line::from(Span::raw(
+            "    T : take off       P : ring on     O : ring off",
+        )),
         Line::from(Span::raw("    R : read           I : identify")),
-        Line::from(Span::raw("    Z : fire wand      (arrows aim, Enter fires)")),
+        Line::from(Span::raw(
+            "    Z : fire wand      (arrows aim, Enter fires)",
+        )),
     ];
     let h = lines.len() as u16 + 2;
     let rect = center_rect(54, h, area);

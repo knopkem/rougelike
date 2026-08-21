@@ -30,7 +30,11 @@ pub fn cast_wand(rng: &mut Rng, game: &mut Game, item: &Item, target: (u8, u8)) 
                 if x == target.0 && y == target.1 {
                     break;
                 }
-                if let Some(idx) = game.monsters.iter().position(|m| m.pos == (x, y) && !m.dead) {
+                if let Some(idx) = game
+                    .monsters
+                    .iter()
+                    .position(|m| m.pos == (x, y) && !m.dead)
+                {
                     let dmg = rng.int(3..8) as u8;
                     game.monsters[idx].hp = game.monsters[idx].hp.saturating_sub(dmg);
                     if game.monsters[idx].hp == 0 {
@@ -103,10 +107,7 @@ pub fn cast_wand(rng: &mut Rng, game: &mut Game, item: &Item, target: (u8, u8)) 
         }
         crate::items::item::ItemKind::Wand(WandKind::CurePoison) => {
             game.statuses.poison = 0;
-            game.log(
-                crate::core::message::MessageKind::Good,
-                "The poison fades.",
-            );
+            game.log(crate::core::message::MessageKind::Good, "The poison fades.");
         }
         crate::items::item::ItemKind::Wand(WandKind::Blink) => {
             // The player is briefly turned to stone as reality reassembles.
@@ -168,10 +169,7 @@ pub fn apply_potion(game: &mut Game, kind: PotionKind) {
         PotionKind::CurePoison => {
             game.statuses.poison = 0;
             game.statuses.disease = 0;
-            game.log(
-                crate::core::message::MessageKind::Good,
-                "The poison fades.",
-            );
+            game.log(crate::core::message::MessageKind::Good, "The poison fades.");
         }
         PotionKind::Energy => {
             game.player.ep = game.player.max_ep;
@@ -283,11 +281,10 @@ pub fn apply_scroll(game: &mut Game, kind: ScrollKind) {
                         crate::core::message::MessageKind::Normal,
                         "You blink out of reality!",
                     );
-                    if game.rng.chance(if game.statuses.is_blessed() {
-                        8
-                    } else {
-                        20
-                    }) {
+                    if game
+                        .rng
+                        .chance(if game.statuses.is_blessed() { 8 } else { 20 })
+                    {
                         game.statuses.petrification = 3;
                         game.log(
                             crate::core::message::MessageKind::Bad,
@@ -366,22 +363,75 @@ pub fn apply_scroll(game: &mut Game, kind: ScrollKind) {
             );
         }
         ScrollKind::Opening => {
+            // Opens a closed door under or adjacent to the player; a locked
+            // door is unlocked with an iron key (consumed).
             let pos = game.player.pos;
-            if game.current().tile_at(pos) == crate::map::level::Tile::DoorClosed {
-                game.current_mut().set_tile(pos, crate::map::level::Tile::Floor);
-                game.emit(crate::core::events::GameEvent::Door {
-                    opened: true,
-                    locked: false,
-                });
-                game.log(
-                    crate::core::message::MessageKind::Normal,
-                    "The door swings open.",
-                );
-            } else {
-                game.log(
-                    crate::core::message::MessageKind::Normal,
-                    "Nothing happens.",
-                );
+            let (px, py) = (pos.0 as i32, pos.1 as i32);
+            let around: [(i32, i32); 5] = [
+                (px, py),
+                (px - 1, py),
+                (px + 1, py),
+                (px, py - 1),
+                (px, py + 1),
+            ];
+            let in_bounds = |p: (i32, i32)| {
+                p.0 >= 0
+                    && p.0 < crate::map::level::MAP_W as i32
+                    && p.1 >= 0
+                    && p.1 < crate::map::level::MAP_H as i32
+            };
+            let doors: Vec<(u8, u8)> = around
+                .iter()
+                .filter(|p| in_bounds(**p))
+                .map(|p| (p.0 as u8, p.1 as u8))
+                .filter(|p| game.current().is_door(*p))
+                .collect();
+            let closed = doors
+                .iter()
+                .find(|p| game.current().tile_at(**p) == crate::map::level::Tile::DoorClosed)
+                .copied();
+            let locked = doors
+                .iter()
+                .find(|p| game.current().tile_at(**p) == crate::map::level::Tile::DoorLocked)
+                .copied();
+            match (closed, locked) {
+                (Some(p), None) => {
+                    game.current_mut()
+                        .set_tile(p, crate::map::level::Tile::Floor);
+                    game.emit(crate::core::events::GameEvent::Door {
+                        opened: true,
+                        locked: false,
+                    });
+                    game.log(
+                        crate::core::message::MessageKind::Normal,
+                        "The door swings open.",
+                    );
+                }
+                (None, Some(p)) if game.player_has_key() => {
+                    game.consume_key();
+                    game.current_mut()
+                        .set_tile(p, crate::map::level::Tile::Floor);
+                    game.emit(crate::core::events::GameEvent::Door {
+                        opened: true,
+                        locked: true,
+                    });
+                    game.log(
+                        crate::core::message::MessageKind::Normal,
+                        "The iron key turns in the lock.",
+                    );
+                }
+                (None, Some(_)) => {
+                    game.log(
+                        crate::core::message::MessageKind::Normal,
+                        "The door is locked. You need a key.",
+                    );
+                }
+                _ => {
+                    game.log(
+                        crate::core::message::MessageKind::Normal,
+                        "Nothing happens.",
+                    );
+                }
             }
         }
         ScrollKind::Fear => {
@@ -526,10 +576,7 @@ mod tests {
         // not move the player and must not place it on a monster.
         apply_scroll(&mut g, ScrollKind::Teleport);
         assert!(
-            !g
-                .monsters
-                .iter()
-                .any(|m| m.pos == g.player.pos && !m.dead),
+            !g.monsters.iter().any(|m| m.pos == g.player.pos && !m.dead),
             "player must not land on a monster"
         );
         assert!(g.current().is_walkable(g.player.pos));
@@ -609,23 +656,16 @@ mod tests {
     fn opening_scroll_opens_adjacent_door() {
         let mut g = crate::tests_harness::new_game(42);
         let pos = g.player.pos;
-        g.current_mut().set_tile(pos, crate::map::level::Tile::DoorClosed);
+        g.current_mut()
+            .set_tile(pos, crate::map::level::Tile::DoorClosed);
         apply_scroll(&mut g, ScrollKind::Opening);
-        assert_eq!(
-            g.current().tile_at(pos),
-            crate::map::level::Tile::Floor
-        );
+        assert_eq!(g.current().tile_at(pos), crate::map::level::Tile::Floor);
     }
 }
 
 /// Reveal the first unidentified item the player carries, if any.
 fn identify_items(game: &mut Game) {
-    if let Some(slot) = game
-        .player
-        .inventory
-        .iter()
-        .position(|i| !i.identified)
-    {
+    if let Some(slot) = game.player.inventory.iter().position(|i| !i.identified) {
         game.identify_item(slot);
         let name = game.player.inventory[slot].name();
         game.log(

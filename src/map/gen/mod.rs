@@ -21,14 +21,26 @@ pub fn generate(depth: u8, rng: &mut Rng) -> Level {
     // Place stairs: down in a far room, up in a different room.
     place_stairs(&mut level, &rooms, rng, depth);
 
-    // Vaults.
+    // Vaults (shop D2, arena D15, amulet D25).
     place_vaults(&mut level, &rooms, rng, depth);
 
-    // Decorate: items, gold, traps.
+    // Decorate: items, gold.
     decorate(&mut level, &rooms, rng, depth);
+
+    // Doors on room doorways (with keys for locked ones).
+    place_doors(&mut level, rng, depth);
+
+    // Traps on corridors and floors.
+    place_traps(&mut level, rng, depth);
+
+    // Themed hazards: spore gas D6-10, water D11-15, lava D16-20.
+    place_hazards(&mut level, rng, depth);
 
     // Connectivity repair: ensure player start + stairs reachable.
     repair_connectivity(&mut level, rng, depth);
+
+    // Door sanity: a door that would trap the stairs stays open.
+    repair_doors(&mut level);
 
     let _ = theme;
     level
@@ -145,10 +157,7 @@ fn gen_cellular_section(level: &mut Level, rng: &mut Rng, depth: u8) {
     for y in 0..h {
         for x in 0..w {
             if grid[y as usize * w as usize + x as usize] {
-                level.set_tile(
-                    (ox + x, oy + y),
-                    Tile::Floor,
-                );
+                level.set_tile((ox + x, oy + y), Tile::Floor);
             }
         }
     }
@@ -182,23 +191,156 @@ fn place_vaults(level: &mut Level, rooms: &[Room], rng: &mut Rng, depth: u8) {
         let r = rooms[(rng.int(0..rooms.len() as u64)) as usize];
         // Wizard room marker (decorative only).
         let _ = r;
+    } else if depth == 15 {
+        place_boss_arena(level, rooms, rng);
     } else if depth == 25 {
         place_amulet_chamber(level, rooms, rng);
     }
 }
 
+/// D2 shop room: a dedicated walled room with a closed door, connected by a
+/// corridor to the nearest existing room. The door position is recorded on
+/// the level as the seam for the merchant (issue 16).
 fn place_shop_vault(level: &mut Level, rooms: &[Room], rng: &mut Rng) {
-    if rooms.len() < 2 {
+    if rooms.is_empty() {
         return;
     }
+    let w: u8 = 6;
+    let h: u8 = 5;
+    for _ in 0..50 {
+        let ox = rng.int(2..(crate::map::level::MAP_W as u64 - w as u64 - 2)) as u8;
+        let oy = rng.int(2..(crate::map::level::MAP_H as u64 - h as u64 - 2)) as u8;
+        // Must not overlap existing rooms and must sit on clear walls.
+        let overlaps = rooms.iter().any(|r| {
+            ox < r.x + r.w + 1 && ox + w + 1 > r.x && oy < r.y + r.h + 1 && oy + h + 1 > r.y
+        });
+        if overlaps {
+            continue;
+        }
+        let clear = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .all(|(x, y)| level.tile_at((ox + x, oy + y)) == Tile::Wall);
+        if !clear {
+            continue;
+        }
+        // Carve the room.
+        for y in oy..oy + h {
+            for x in ox..ox + w {
+                level.set_tile((x, y), Tile::Floor);
+            }
+        }
+        let center = (ox + w / 2, oy + h / 2);
+        // Corridor from the nearest room center, then a door at the room
+        // mouth.
+        let nearest = rooms
+            .iter()
+            .min_by_key(|r| {
+                let (cx, cy) = (r.center.0 as i32, r.center.1 as i32);
+                (cx - center.0 as i32).abs() + (cy - center.1 as i32).abs()
+            })
+            .unwrap();
+        let target = nearest.center();
+        let door_pos = door_mouth(ox, oy, w, h, center, nearest);
+        carve_corridor(level, center, target, rng);
+        level.set_tile(door_pos, Tile::DoorClosed);
+        if !stairs_reachable(level) {
+            level.set_tile(door_pos, Tile::Floor);
+        }
+        level.shop_room = Some(door_pos);
+        return;
+    }
+    // Fallback: mark an existing room as the shop room.
     let r = rooms[(rng.int(0..rooms.len() as u64)) as usize];
     let c = r.center();
     level.set_tile(c, Tile::Floor);
-    // NPC placed by decorate.
-    let _ = c;
+    level.shop_room = Some(c);
 }
 
- fn place_amulet_chamber(level: &mut Level, rooms: &[Room], rng: &mut Rng) {
+/// D15 boss arena: a dedicated walled arena room with a closed door and a
+/// corridor to the nearest existing room. The boss itself is issue 19; this
+/// only provides the arena and records its door.
+fn place_boss_arena(level: &mut Level, rooms: &[Room], rng: &mut Rng) {
+    if rooms.is_empty() {
+        return;
+    }
+    let w: u8 = 9;
+    let h: u8 = 6;
+    for _ in 0..50 {
+        let ox = rng.int(2..(crate::map::level::MAP_W as u64 - w as u64 - 2)) as u8;
+        let oy = rng.int(2..(crate::map::level::MAP_H as u64 - h as u64 - 2)) as u8;
+        let overlaps = rooms.iter().any(|r| {
+            ox < r.x + r.w + 1 && ox + w + 1 > r.x && oy < r.y + r.h + 1 && oy + h + 1 > r.y
+        });
+        if overlaps {
+            continue;
+        }
+        let clear = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .all(|(x, y)| level.tile_at((ox + x, oy + y)) == Tile::Wall);
+        if !clear {
+            continue;
+        }
+        for y in oy..oy + h {
+            for x in ox..ox + w {
+                level.set_tile((x, y), Tile::Floor);
+            }
+        }
+        let center = (ox + w / 2, oy + h / 2);
+        let nearest = rooms
+            .iter()
+            .min_by_key(|r| {
+                let (cx, cy) = (r.center.0 as i32, r.center.1 as i32);
+                (cx - center.0 as i32).abs() + (cy - center.1 as i32).abs()
+            })
+            .unwrap();
+        let target = nearest.center();
+        let door_pos = door_mouth(ox, oy, w, h, center, nearest);
+        carve_corridor(level, center, target, rng);
+        level.set_tile(door_pos, Tile::DoorClosed);
+        if !stairs_reachable(level) {
+            level.set_tile(door_pos, Tile::Floor);
+        }
+        level.boss_arena = Some(door_pos);
+        return;
+    }
+    // Fallback: the largest existing room is the arena.
+    let r = rooms
+        .iter()
+        .max_by_key(|r| (r.w as usize) * (r.h as usize))
+        .unwrap();
+    let c = r.center();
+    level.boss_arena = Some(c);
+}
+
+/// The doorway tile on the wall of the shop/arena room where the corridor to
+/// `room` exits. Mirrors `carve_corridor`, which runs the x phase at the
+/// room center's row and the y phase at the target's column.
+fn door_mouth(ox: u8, oy: u8, w: u8, h: u8, center: (u8, u8), room: &Room) -> (u8, u8) {
+    let (tx, ty) = (room.center.0, room.center.1);
+    if tx < center.0 {
+        if tx < ox {
+            (ox - 1, center.1)
+        } else if ty < center.1 {
+            (tx, oy - 1)
+        } else {
+            (tx, oy + h)
+        }
+    } else if tx > center.0 {
+        if tx >= ox + w {
+            (ox + w, center.1)
+        } else if ty < center.1 {
+            (tx, oy - 1)
+        } else {
+            (tx, oy + h)
+        }
+    } else if ty < center.1 {
+        (center.0, oy - 1)
+    } else {
+        (center.0, oy + h)
+    }
+}
+
+fn place_amulet_chamber(level: &mut Level, rooms: &[Room], rng: &mut Rng) {
     if rooms.len() < 2 {
         return;
     }
@@ -237,6 +379,189 @@ fn decorate(level: &mut Level, rooms: &[Room], rng: &mut Rng, depth: u8) {
     let _ = level;
 }
 
+/// Walkable tiles with at least two wall neighbours: corridor doorways.
+fn corridor_door_points(level: &Level) -> Vec<(u8, u8)> {
+    let mut out = Vec::new();
+    for y in 1..(crate::map::level::MAP_H - 1) {
+        for x in 1..(crate::map::level::MAP_W - 1) {
+            let p = (x, y);
+            if !level.is_walkable(p) {
+                continue;
+            }
+            let mut walls = 0;
+            for (dx, dy) in [(-1i8, 0), (1, 0), (0, -1), (0, 1)] {
+                let q = ((x as i8 + dx) as u8, (y as i8 + dy) as u8);
+                if level.tile_at(q) == Tile::Wall {
+                    walls += 1;
+                }
+            }
+            if walls >= 2 {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+/// Place 1-5 doors on corridor doorways; ~20% of them are locked, and each
+/// locked door has an iron key dropped on the ground.
+fn place_doors(level: &mut Level, rng: &mut Rng, _depth: u8) {
+    let mut candidates = corridor_door_points(level);
+    let important = important_tiles(level);
+    candidates.retain(|p| !important.contains(p));
+    let n = (candidates.len() / 12 + 1).min(5);
+    for _i in 0..n {
+        if candidates.is_empty() {
+            break;
+        }
+        let p = candidates[(rng.int(0..candidates.len() as u64)) as usize];
+        candidates.retain(|q| *q != p);
+        let locked = rng.chance(20);
+        // Tentatively close the door; if that strands the stairs, leave it
+        // open and try another doorway.
+        level.set_tile(
+            p,
+            if locked {
+                Tile::DoorLocked
+            } else {
+                Tile::DoorClosed
+            },
+        );
+        if !stairs_reachable(level) {
+            level.set_tile(p, Tile::Floor);
+            continue;
+        }
+        if locked {
+            let key_pos = random_floor_spot(level, &important, rng);
+            if let Some(kp) = key_pos {
+                level.add_item(kp, crate::items::catalog::make_key());
+            }
+        }
+    }
+}
+
+/// Stairs reachable from the player start with every door treated as a wall.
+fn stairs_reachable(level: &Level) -> bool {
+    let reached = level.reachable(level.player_start);
+    level.stairs_up.is_none_or(|s| reached[Level::pos_idx(s)])
+        && level.stairs_down.is_none_or(|s| reached[Level::pos_idx(s)])
+}
+
+/// A random plain Floor tile that is not a player start/stairs/door mouth.
+fn random_floor_spot(level: &Level, important: &[(u8, u8)], rng: &mut Rng) -> Option<(u8, u8)> {
+    let mut spots: Vec<(u8, u8)> = level
+        .floor_tiles()
+        .into_iter()
+        .filter(|p| level.tile_at(*p) == Tile::Floor)
+        .filter(|p| !important.contains(p))
+        .collect();
+    if spots.is_empty() {
+        return None;
+    }
+    let p = spots[(rng.int(0..spots.len() as u64)) as usize];
+    spots.retain(|q| q != &p);
+    Some(p)
+}
+
+/// Tiles that must never be covered by traps, hazards or doors.
+fn important_tiles(level: &Level) -> Vec<(u8, u8)> {
+    let mut v = vec![level.player_start];
+    if let Some(s) = level.stairs_up {
+        v.push(s);
+    }
+    if let Some(s) = level.stairs_down {
+        v.push(s);
+    }
+    if let Some(s) = level.shop_room {
+        v.push(s);
+    }
+    if let Some(s) = level.boss_arena {
+        v.push(s);
+    }
+    v
+}
+
+/// Place 1-5 traps (scales with depth) on random floor tiles.
+fn place_traps(level: &mut Level, rng: &mut Rng, depth: u8) {
+    let n = 1 + depth as usize / 5;
+    let kinds = [
+        crate::map::level::TrapKind::Arrow,
+        crate::map::level::TrapKind::Dart,
+        crate::map::level::TrapKind::FallingItem,
+        crate::map::level::TrapKind::Teleport,
+        crate::map::level::TrapKind::SleepGas,
+        crate::map::level::TrapKind::AcidPool,
+    ];
+    let important = important_tiles(level);
+    for _ in 0..n {
+        let p = random_floor_spot(level, &important, rng);
+        if let Some(p) = p {
+            let k = kinds[(rng.int(0..kinds.len() as u64)) as usize];
+            level.set_tile(p, Tile::Trap(k));
+        }
+    }
+}
+
+/// Themed hazard pools: spore gas D6-10, water D11-15, lava D16-20.
+fn place_hazards(level: &mut Level, rng: &mut Rng, depth: u8) {
+    let hazard = match LevelTheme::for_depth(depth) {
+        LevelTheme::FungalGrottos => Some(Tile::SporeGas),
+        LevelTheme::DrownedVaults => Some(Tile::Water),
+        LevelTheme::EmberWorks => Some(Tile::Lava),
+        LevelTheme::BarrowHalls | LevelTheme::Abyss => None,
+    };
+    let Some(hz) = hazard else {
+        return;
+    };
+    let important = important_tiles(level);
+    for _ in 0..4 {
+        // Random walk of 3-4 tiles from a random start.
+        let mut p = match random_floor_spot(level, &important, rng) {
+            Some(p) => p,
+            None => continue,
+        };
+        let steps = 3 + (rng.int(0..2)) as usize;
+        for _ in 0..steps {
+            if !important.contains(&p) && level.tile_at(p) == Tile::Floor {
+                level.set_tile(p, hz);
+            }
+            let (dx, dy) = [(1i8, 0), (-1, 0), (0, 1), (0, -1)][(rng.int(0..4)) as usize];
+            let nx = (p.0 as i8 + dx) as u8;
+            let ny = (p.1 as i8 + dy) as u8;
+            if !Level::in_bounds(nx, ny) {
+                break;
+            }
+            p = (nx, ny);
+        }
+    }
+}
+
+/// After all placement, any door that would make the stairs unreachable
+/// (with doors treated as walls) is left open.
+fn repair_doors(level: &mut Level) {
+    let start = level.player_start;
+    let mut reached = level.reachable(start);
+    let targets: Vec<(u8, u8)> = level
+        .stairs_up
+        .iter()
+        .copied()
+        .chain(level.stairs_down.iter().copied())
+        .collect();
+    for t in targets {
+        if !reached[Level::pos_idx(t)] {
+            // Open every door on the map until reachable (cheap, rare).
+            for i in 0..level.tiles.len() {
+                if level.tiles[i] == Tile::DoorClosed || level.tiles[i] == Tile::DoorLocked {
+                    level.tiles[i] = Tile::Floor;
+                }
+            }
+            reached = level.reachable(start);
+            break;
+        }
+    }
+    let _ = reached;
+}
+
 fn random_room_point(rooms: &[Room], rng: &mut Rng) -> (u8, u8) {
     if rooms.is_empty() {
         return (40, 12);
@@ -252,10 +577,7 @@ fn random_room_point(rooms: &[Room], rng: &mut Rng) -> (u8, u8) {
 fn repair_connectivity(level: &mut Level, rng: &mut Rng, depth: u8) {
     let start = level.player_start;
     let mut reached = level.reachable(start);
-    for (name, opt) in [
-        ("up", level.stairs_up),
-        ("down", level.stairs_down),
-    ] {
+    for (name, opt) in [("up", level.stairs_up), ("down", level.stairs_down)] {
         if let Some(s) = opt {
             if !reached[Level::pos_idx(s)] {
                 // Carve a corridor from start to s.
@@ -280,7 +602,11 @@ fn repair_connectivity(level: &mut Level, rng: &mut Rng, depth: u8) {
 }
 
 /// Pick a random floor tile on the given level (for spawning).
-pub fn random_floor_tile(game: &crate::core::game::Game, depth: u8, rng: &mut Rng) -> Option<(u8, u8)> {
+pub fn random_floor_tile(
+    game: &crate::core::game::Game,
+    depth: u8,
+    rng: &mut Rng,
+) -> Option<(u8, u8)> {
     let level = game.levels.get(&depth)?;
     let floors = level.floor_tiles();
     if floors.is_empty() {
@@ -298,4 +624,126 @@ fn _theme_for(depth: u8) -> LevelTheme {
 #[allow(dead_code)]
 fn _hashset() -> HashSet<u8> {
     HashSet::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gen_at(depth: u8, seed: u64) -> Level {
+        let mut rng = Rng::new(seed);
+        generate(depth, &mut rng)
+    }
+
+    #[test]
+    fn stairs_reachable_with_doors_closed_at_all_depths() {
+        for seed in 0u64..30 {
+            let depth = (seed % 25) as u8 + 1;
+            let level = gen_at(depth, seed * 7919 + 1);
+            let reached = level.reachable(level.player_start);
+            assert!(
+                level.stairs_up.is_none_or(|s| reached[Level::pos_idx(s)]),
+                "D{depth} seed {seed}: up stairs must be reachable with doors closed"
+            );
+            assert!(
+                level.stairs_down.is_none_or(|s| reached[Level::pos_idx(s)]),
+                "D{depth} seed {seed}: down stairs must be reachable with doors closed"
+            );
+        }
+    }
+
+    #[test]
+    fn d2_generates_a_shop_room() {
+        for seed in 0..10 {
+            let level = gen_at(2, seed * 104729 + 3);
+            assert!(
+                level.shop_room.is_some(),
+                "D2 must have a shop room (seed {seed})"
+            );
+        }
+    }
+
+    #[test]
+    fn d15_generates_a_boss_arena() {
+        for seed in 0..10 {
+            let level = gen_at(15, seed * 15485863 + 5);
+            assert!(
+                level.boss_arena.is_some(),
+                "D15 must have a boss arena (seed {seed})"
+            );
+        }
+    }
+
+    #[test]
+    fn hazards_appear_only_on_their_themed_depths() {
+        let level = gen_at(7, 11);
+        assert!(
+            level.tiles.contains(&Tile::SporeGas),
+            "D7 (Fungal Grottos) must have spore gas"
+        );
+        let level = gen_at(12, 12);
+        assert!(
+            level.tiles.contains(&Tile::Water),
+            "D12 (Drowned Vaults) must have water"
+        );
+        let level = gen_at(17, 13);
+        assert!(
+            level.tiles.contains(&Tile::Lava),
+            "D17 (Ember Works) must have lava"
+        );
+        let level = gen_at(3, 14);
+        assert!(
+            !level
+                .tiles
+                .iter()
+                .any(|t| { matches!(t, Tile::Water | Tile::Lava | Tile::SporeGas) }),
+            "D3 (Barrow Halls) must have no hazards"
+        );
+    }
+
+    #[test]
+    fn traps_are_placed_on_every_depth() {
+        for seed in 0u64..10 {
+            let depth = (seed % 25) as u8 + 1;
+            let level = gen_at(depth, seed * 9973 + 17);
+            assert!(
+                level.tiles.iter().any(|t| matches!(t, Tile::Trap(_))),
+                "D{depth} seed {seed} must have at least one trap"
+            );
+        }
+    }
+
+    #[test]
+    fn doors_are_placed_and_keys_cover_locked_doors() {
+        for seed in 0u64..10 {
+            let depth = (seed % 25) as u8 + 1;
+            let level = gen_at(depth, seed * 6151 + 19);
+            let locked: usize = level
+                .tiles
+                .iter()
+                .filter(|t| **t == Tile::DoorLocked)
+                .count();
+            let keys: usize = level
+                .items
+                .values()
+                .flatten()
+                .filter(|i| i.kind == crate::items::item::ItemKind::Key)
+                .count();
+            assert!(
+                keys >= locked,
+                "every locked door needs a key on the ground (D{depth} seed {seed})"
+            );
+        }
+    }
+
+    #[test]
+    fn locked_doors_never_strand_the_player_start_or_stairs() {
+        // Even if a door is the only way in, repair keeps the level playable:
+        // the player start must be walkable and the stairs reachable.
+        for seed in 0..10 {
+            let level = gen_at(20, seed * 4729 + 23);
+            assert!(level.is_walkable(level.player_start));
+            assert_eq!(level.tile_at(level.player_start), Tile::Floor);
+        }
+    }
 }

@@ -114,7 +114,11 @@ impl Game {
 
     pub fn new_test(name: &str, race: &str, class: &str, seed: u64) -> Self {
         let mut g = Self::new(seed, name, race, class);
-        g.messages.push(0, crate::core::message::MessageKind::System, "Welcome to Deepdelve!");
+        g.messages.push(
+            0,
+            crate::core::message::MessageKind::System,
+            "Welcome to Deepdelve!",
+        );
         g
     }
 
@@ -154,13 +158,11 @@ impl Game {
         let max_attempts = n + 4;
         while placed < n && attempts < max_attempts {
             attempts += 1;
-            if let Some(p) = crate::map::gen::random_floor_tile(self, depth, &mut self.rng.clone()) {
+            if let Some(p) = crate::map::gen::random_floor_tile(self, depth, &mut self.rng.clone())
+            {
                 if p != self.player.pos {
-                    let mut m = crate::entities::monster::spawn_monster(
-                        &mut self.rng,
-                        depth,
-                        self.endless,
-                    );
+                    let mut m =
+                        crate::entities::monster::spawn_monster(&mut self.rng, depth, self.endless);
                     m.pos = p;
                     self.monsters.push(m);
                     placed += 1;
@@ -214,10 +216,7 @@ impl Game {
     fn player_turn(&mut self, action: crate::core::action::Action) {
         // Status lockouts: the player cannot act, but the turn still passes.
         if self.statuses.is_paralyzed() {
-            self.log(
-                crate::core::message::MessageKind::Bad,
-                "You are paralyzed!",
-            );
+            self.log(crate::core::message::MessageKind::Bad, "You are paralyzed!");
             return;
         }
         if self.statuses.is_petrified() {
@@ -336,35 +335,40 @@ impl Game {
         let ny = (py as i32 + dy) as u8;
         let np = (nx, ny);
 
-        if let Some(m_idx) = self
-            .monsters
-            .iter()
-            .position(|m| m.pos == np && !m.dead)
-        {
+        if let Some(m_idx) = self.monsters.iter().position(|m| m.pos == np && !m.dead) {
             self.attack_monster(m_idx);
             return true;
+        }
+        // Doors block movement; bumping a door opens it (or, when locked,
+        // unlocks it with an iron key from the inventory).
+        match self.current().tile_at(np) {
+            crate::map::level::Tile::DoorClosed => {
+                self.open_door(np);
+                return true;
+            }
+            crate::map::level::Tile::DoorLocked => {
+                self.unlock_door(np);
+                return true;
+            }
+            _ => {}
         }
         if !self.current().is_walkable(np) {
             return true;
         }
         self.player.pos = np;
         self.emit(GameEvent::Footstep);
-        if self.current().tile_at(np) == crate::map::level::Tile::SporeGas
-            && self.rng.chance(25)
-        {
-            self.statuses.poison = 5;
-            self.log(
-                crate::core::message::MessageKind::Bad,
-                "Spore gas billows into your lungs!",
-            );
-        }
-        if let Some(gold) = self.current_mut().take_gold_at(np) {
-            self.player.gold += gold;
-            self.emit(GameEvent::Coin);
-            self.log(
-                crate::core::message::MessageKind::Normal,
-                format!("You pick up {gold} gold."),
-            );
+        let teleported = self.apply_tile_effects(np);
+        // A teleport trap moved the player: don't auto-collect at the
+        // tile they left.
+        if !teleported {
+            if let Some(gold) = self.current_mut().take_gold_at(np) {
+                self.player.gold += gold;
+                self.emit(GameEvent::Coin);
+                self.log(
+                    crate::core::message::MessageKind::Normal,
+                    format!("You pick up {gold} gold."),
+                );
+            }
         }
         {
             let mut quests = self.quests.clone();
@@ -374,13 +378,195 @@ impl Game {
         true
     }
 
+    /// Effects of the tile the player just stepped onto. Traps trigger on
+    /// entry and disarm; water slows, lava burns, spore gas poisons.
+    fn apply_tile_effects(&mut self, pos: (u8, u8)) -> bool {
+        if let Some(trap) = self.current().trap_at(pos) {
+            self.trigger_trap(pos, trap);
+            // A teleport trap may have moved the player.
+            return self.player.pos != pos;
+        }
+        match self.current().tile_at(pos) {
+            crate::map::level::Tile::Water => {
+                self.statuses.slow = self.statuses.slow.max(2);
+                self.log(
+                    crate::core::message::MessageKind::Normal,
+                    "The deep water slows your movements.",
+                );
+            }
+            crate::map::level::Tile::Lava => {
+                let dmg = 2 + self.rng.int(0..3) as u8;
+                self.player.hp = self.player.hp.saturating_sub(dmg);
+                if dmg > 0 {
+                    self.record_damage(DeathCause::Burned, None);
+                }
+                self.log(
+                    crate::core::message::MessageKind::Bad,
+                    format!("The lava sears you for {dmg}!"),
+                );
+            }
+            crate::map::level::Tile::SporeGas if self.rng.chance(25) => {
+                self.statuses.poison = 5;
+                self.log(
+                    crate::core::message::MessageKind::Bad,
+                    "Spore gas billows into your lungs!",
+                );
+            }
+            _ => {}
+        }
+        false
+    }
+
+    /// Bump-to-open: the closed door swings open, costing the turn.
+    fn open_door(&mut self, pos: (u8, u8)) {
+        self.current_mut()
+            .set_tile(pos, crate::map::level::Tile::Floor);
+        self.emit(GameEvent::Door {
+            opened: true,
+            locked: false,
+        });
+        self.log(
+            crate::core::message::MessageKind::Normal,
+            "You open the door.",
+        );
+    }
+
+    /// A locked door needs an iron key; the key is consumed and the door
+    /// swings open, costing the turn.
+    fn unlock_door(&mut self, pos: (u8, u8)) {
+        if !self.player_has_key() {
+            self.log(
+                crate::core::message::MessageKind::Normal,
+                "The door is locked. You need a key.",
+            );
+            return;
+        }
+        self.consume_key();
+        self.current_mut()
+            .set_tile(pos, crate::map::level::Tile::Floor);
+        self.emit(GameEvent::Door {
+            opened: true,
+            locked: true,
+        });
+        self.log(
+            crate::core::message::MessageKind::Normal,
+            "You use the iron key to unlock the door.",
+        );
+    }
+
+    pub(crate) fn player_has_key(&self) -> bool {
+        self.player
+            .inventory
+            .iter()
+            .any(|i| i.kind == crate::items::item::ItemKind::Key)
+    }
+
+    pub(crate) fn consume_key(&mut self) {
+        if let Some(slot) = self
+            .player
+            .inventory
+            .iter()
+            .position(|i| i.kind == crate::items::item::ItemKind::Key)
+        {
+            self.player.inventory.remove(slot);
+        }
+    }
+
+    /// Trigger the trap under the player. The trap disarms after firing.
+    fn trigger_trap(&mut self, pos: (u8, u8), kind: crate::map::level::TrapKind) {
+        self.current_mut()
+            .set_tile(pos, crate::map::level::Tile::Floor);
+        self.emit(GameEvent::Trap);
+        match kind {
+            crate::map::level::TrapKind::Arrow => {
+                let dmg = 2 + self.rng.int(0..4) as u8;
+                self.player.hp = self.player.hp.saturating_sub(dmg);
+                if dmg > 0 {
+                    self.record_damage(DeathCause::Other, None);
+                }
+                self.log(
+                    crate::core::message::MessageKind::Bad,
+                    format!("A trap hurls an arrow into you for {dmg}!"),
+                );
+            }
+            crate::map::level::TrapKind::Dart => {
+                self.player.hp = self.player.hp.saturating_sub(1);
+                self.record_damage(DeathCause::Poisoned, None);
+                self.statuses.poison = self.statuses.poison.max(3);
+                self.log(
+                    crate::core::message::MessageKind::Bad,
+                    "A dart stings you! The tip is poisoned.",
+                );
+            }
+            crate::map::level::TrapKind::FallingItem => {
+                if !self.player.inventory.is_empty() {
+                    let slot = self.rng.int(0..self.player.inventory.len() as u64) as usize;
+                    let item = self.player.inventory.remove(slot);
+                    let name = item.name();
+                    self.current_mut().add_item(pos, item);
+                    self.emit(GameEvent::Drop);
+                    self.log(
+                        crate::core::message::MessageKind::Bad,
+                        format!("You fumble and drop the {name}!"),
+                    );
+                } else {
+                    self.log(
+                        crate::core::message::MessageKind::Normal,
+                        "Your hands scramble, but you carry nothing to lose.",
+                    );
+                }
+            }
+            crate::map::level::TrapKind::Teleport => {
+                let level = self.current();
+                let candidates: Vec<(u8, u8)> = level
+                    .floor_tiles()
+                    .into_iter()
+                    .filter(|p| *p != pos)
+                    .filter(|p| !self.monsters.iter().any(|m| m.pos == *p && !m.dead))
+                    .collect();
+                match self.rng.pick(&candidates) {
+                    Some(dst) => {
+                        self.player.pos = dst;
+                        self.emit(GameEvent::Teleport);
+                        self.log(
+                            crate::core::message::MessageKind::Bad,
+                            "The floor gives way; you are teleported somewhere!",
+                        );
+                    }
+                    None => {
+                        self.log(
+                            crate::core::message::MessageKind::Normal,
+                            "The trap whirs, but nothing happens.",
+                        );
+                    }
+                }
+            }
+            crate::map::level::TrapKind::SleepGas => {
+                self.statuses.sleep = self.statuses.sleep.max(3);
+                self.log(
+                    crate::core::message::MessageKind::Bad,
+                    "A sleep gas billows over you!",
+                );
+            }
+            crate::map::level::TrapKind::AcidPool => {
+                let dmg = 2 + self.rng.int(0..3) as u8;
+                self.player.hp = self.player.hp.saturating_sub(dmg);
+                if dmg > 0 {
+                    self.record_damage(DeathCause::Other, None);
+                }
+                self.log(
+                    crate::core::message::MessageKind::Bad,
+                    format!("You plunge into an acid pool; it burns for {dmg}!"),
+                );
+            }
+        }
+    }
+
     fn attack_monster(&mut self, idx: usize) {
         let combat_rng = self.rng.clone();
         let mut combat = crate::combat::Combat::new(combat_rng);
         let m_name = self.monsters[idx].name.clone();
-        let penalty = self
-            .statuses
-            .hunger_to_hit_penalty(self.player.hunger);
+        let penalty = self.statuses.hunger_to_hit_penalty(self.player.hunger);
         let res = combat.player_attacks(&self.player, &self.monsters[idx], penalty);
         if res.hit {
             self.emit(GameEvent::Hit { crit: res.crit });
@@ -407,10 +593,7 @@ impl Game {
                 format!("You miss {m_name}."),
             );
         }
-        if !self.monsters.is_empty()
-            && idx < self.monsters.len()
-            && self.monsters[idx].hp > 0
-        {
+        if !self.monsters.is_empty() && idx < self.monsters.len() && self.monsters[idx].hp > 0 {
             let res2 = combat.monster_attacks(&self.monsters[idx], &self.player);
             if res2.hit {
                 let dmg = res2.damage;
@@ -448,10 +631,7 @@ impl Game {
         }
         self.emit(GameEvent::MonsterDeath { tier });
         if crate::items::loot::maybe_drop(&mut self.rng, tier) {
-            let drop = crate::items::loot::roll_drop(
-                &mut self.rng,
-                self.current_level,
-            );
+            let drop = crate::items::loot::roll_drop(&mut self.rng, self.current_level);
             let pos = m.pos;
             self.current_mut().add_item(pos, drop);
             self.log(
@@ -558,8 +738,7 @@ impl Game {
         if let Some(item) = item {
             if !matches!(
                 item.kind,
-                crate::items::item::ItemKind::Weapon(_)
-                    | crate::items::item::ItemKind::Shield(_)
+                crate::items::item::ItemKind::Weapon(_) | crate::items::item::ItemKind::Shield(_)
             ) {
                 return;
             }
@@ -756,7 +935,7 @@ impl Game {
         }
     }
 
-      fn monster_turns(&mut self) {
+    fn monster_turns(&mut self) {
         let player_invisible = self.statuses.is_invisible();
         let mut i = 0;
         while i < self.monsters.len() {
@@ -798,10 +977,7 @@ impl Game {
                                 }
                                 self.log(
                                     crate::core::message::MessageKind::Combat,
-                                    format!(
-                                        "{} hits you for {dmg}.",
-                                        self.monsters[i].name
-                                    ),
+                                    format!("{} hits you for {dmg}.", self.monsters[i].name),
                                 );
                                 self.emit(GameEvent::Hit { crit: false });
                             }
@@ -855,11 +1031,9 @@ impl Game {
         if !self.rng.chance(30) {
             return;
         }
-        if let Some(p) = crate::map::gen::random_floor_tile(
-            self,
-            self.current_level,
-            &mut self.rng.clone(),
-        ) {
+        if let Some(p) =
+            crate::map::gen::random_floor_tile(self, self.current_level, &mut self.rng.clone())
+        {
             if p != self.player.pos {
                 let mut m = crate::entities::monster::spawn_monster(
                     &mut self.rng,
@@ -970,10 +1144,7 @@ mod tests {
             .all()
             .iter()
             .any(|m| m.text == "You are now level 2!"));
-        assert!(g
-            .events
-            .iter()
-            .any(|e| matches!(e, GameEvent::LevelUp)));
+        assert!(g.events.iter().any(|e| matches!(e, GameEvent::LevelUp)));
     }
 
     fn game_equipped() -> Game {
@@ -991,16 +1162,12 @@ mod tests {
             0,
             false,
         ));
-        g.player
-            .rings
-            .push(crate::items::catalog::make_ring(
-                crate::items::item::RingKind::Protection,
-            ));
-        g.player
-            .rings
-            .push(crate::items::catalog::make_ring(
-                crate::items::item::RingKind::Energy,
-            ));
+        g.player.rings.push(crate::items::catalog::make_ring(
+            crate::items::item::RingKind::Protection,
+        ));
+        g.player.rings.push(crate::items::catalog::make_ring(
+            crate::items::item::RingKind::Energy,
+        ));
         g
     }
 
@@ -1019,12 +1186,14 @@ mod tests {
         let armor = g.player.armor.clone().unwrap();
         let first = g.player.rings[0].clone();
         g.do_turn(crate::core::action::Action::TakeOff(2));
-        assert!(g
-            .player
-            .armor
-            .as_ref()
-            .map(|a| a == &armor)
-            .unwrap_or(false), "armor untouched");
+        assert!(
+            g.player
+                .armor
+                .as_ref()
+                .map(|a| a == &armor)
+                .unwrap_or(false),
+            "armor untouched"
+        );
         assert_eq!(g.player.rings.len(), 1);
         assert_eq!(
             g.player.rings[0].kind,
@@ -1146,7 +1315,10 @@ mod tests {
             .all()
             .iter()
             .any(|m| m.text.starts_with("You are now level")));
-        assert!(g.drain_events().iter().all(|e| !matches!(e, GameEvent::LevelUp)));
+        assert!(g
+            .drain_events()
+            .iter()
+            .all(|e| !matches!(e, GameEvent::LevelUp)));
     }
 
     fn walkable_dir(g: &Game) -> (i32, i32) {
@@ -1226,10 +1398,7 @@ mod tests {
         let (dx2, dy2) = walkable_dir(&g);
         g.turn = 2; // even turn: the move goes through
         g.do_turn(crate::core::action::Action::Move(dx2, dy2));
-        assert_ne!(
-            g.player.pos, start,
-            "the move must land on the even turn"
-        );
+        assert_ne!(g.player.pos, start, "the move must land on the even turn");
     }
 
     #[test]
@@ -1280,7 +1449,8 @@ mod tests {
         let (dx, dy) = walkable_dir(&g);
         let (px, py) = g.player.pos;
         let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
-        g.current_mut().set_tile(np, crate::map::level::Tile::SporeGas);
+        g.current_mut()
+            .set_tile(np, crate::map::level::Tile::SporeGas);
         for _ in 0..200 {
             if g.statuses.poison > 0 {
                 break;
@@ -1300,6 +1470,220 @@ mod tests {
     }
 
     #[test]
+    fn bumping_closed_door_opens_it_and_costs_a_turn() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut()
+            .set_tile(np, crate::map::level::Tile::DoorClosed);
+        let turn_before = g.turn;
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert_eq!(g.turn, turn_before + 1, "bumping a door must cost a turn");
+        assert_eq!(
+            g.player.pos,
+            (px, py),
+            "the player must not walk through a door"
+        );
+        assert_eq!(
+            g.current().tile_at(np),
+            crate::map::level::Tile::Floor,
+            "the door must open"
+        );
+        assert!(g.drain_events().iter().any(|e| matches!(
+            e,
+            GameEvent::Door {
+                opened: true,
+                locked: false
+            }
+        )));
+    }
+
+    #[test]
+    fn locked_door_opens_only_with_a_key() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut()
+            .set_tile(np, crate::map::level::Tile::DoorLocked);
+        // No key: the door stays locked.
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert_eq!(
+            g.current().tile_at(np),
+            crate::map::level::Tile::DoorLocked,
+            "a locked door must not open without a key"
+        );
+        assert_eq!(g.player.pos, (px, py));
+        // With a key: the key is consumed and the door opens.
+        g.player.inventory.push(crate::items::catalog::make_key());
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert_eq!(g.current().tile_at(np), crate::map::level::Tile::Floor);
+        assert!(!g.player_has_key(), "the key must be consumed");
+        assert!(g.drain_events().iter().any(|e| matches!(
+            e,
+            GameEvent::Door {
+                opened: true,
+                locked: true
+            }
+        )));
+    }
+
+    #[test]
+    fn stepping_on_a_trap_triggers_and_disarms_it() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut().set_tile(
+            np,
+            crate::map::level::Tile::Trap(crate::map::level::TrapKind::Arrow),
+        );
+        let hp_before = g.player.hp;
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert_eq!(g.player.pos, np);
+        assert_eq!(
+            g.current().tile_at(np),
+            crate::map::level::Tile::Floor,
+            "the trap must disarm after firing"
+        );
+        assert!(g.player.hp < hp_before, "the arrow trap must damage");
+        assert!(g
+            .drain_events()
+            .iter()
+            .any(|e| matches!(e, GameEvent::Trap)));
+    }
+
+    #[test]
+    fn falling_item_trap_drops_a_random_item() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.player
+            .inventory
+            .push(crate::items::catalog::make_amulet());
+        g.current_mut().set_tile(
+            np,
+            crate::map::level::Tile::Trap(crate::map::level::TrapKind::FallingItem),
+        );
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert!(g.player.inventory.is_empty(), "the item must be dropped");
+        assert!(
+            !g.current().items_at(np).is_empty(),
+            "the item is on the ground"
+        );
+    }
+
+    #[test]
+    fn teleport_trap_moves_the_player() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut().set_tile(
+            np,
+            crate::map::level::Tile::Trap(crate::map::level::TrapKind::Teleport),
+        );
+        let hp_before = g.player.hp;
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert_eq!(
+            g.current().tile_at(np),
+            crate::map::level::Tile::Floor,
+            "the trap must disarm"
+        );
+        assert_eq!(g.player.hp, hp_before, "teleport must not damage");
+        assert!(g
+            .drain_events()
+            .iter()
+            .any(|e| matches!(e, GameEvent::Teleport)));
+        assert!(
+            g.current().is_walkable(g.player.pos),
+            "the player must land on a walkable tile"
+        );
+    }
+
+    #[test]
+    fn sleep_gas_and_acid_traps_apply_their_effects() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut().set_tile(
+            np,
+            crate::map::level::Tile::Trap(crate::map::level::TrapKind::SleepGas),
+        );
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert!(
+            g.statuses.sleep > 0,
+            "sleep gas must put the player to sleep"
+        );
+
+        let (dx2, dy2) = walkable_dir(&g);
+        let (px2, py2) = g.player.pos;
+        let np2 = ((px2 as i32 + dx2) as u8, (py2 as i32 + dy2) as u8);
+        g.statuses.sleep = 0;
+        g.current_mut().set_tile(
+            np2,
+            crate::map::level::Tile::Trap(crate::map::level::TrapKind::AcidPool),
+        );
+        let hp_before = g.player.hp;
+        g.do_turn(crate::core::action::Action::Move(dx2, dy2));
+        assert!(g.player.hp < hp_before, "the acid pool must damage");
+    }
+
+    #[test]
+    fn dart_trap_poisons_the_player() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut().set_tile(
+            np,
+            crate::map::level::Tile::Trap(crate::map::level::TrapKind::Dart),
+        );
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert!(g.statuses.poison > 0, "the dart must poison");
+    }
+
+    #[test]
+    fn water_tile_slows_the_player() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut().set_tile(np, crate::map::level::Tile::Water);
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert!(g.statuses.slow > 0, "deep water must slow the player");
+    }
+
+    #[test]
+    fn lava_tile_damages_the_player() {
+        let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+        g.monsters.clear();
+        let (dx, dy) = walkable_dir(&g);
+        let (px, py) = g.player.pos;
+        let np = ((px as i32 + dx) as u8, (py as i32 + dy) as u8);
+        g.current_mut().set_tile(np, crate::map::level::Tile::Lava);
+        let hp_before = g.player.hp;
+        g.do_turn(crate::core::action::Action::Move(dx, dy));
+        assert!(g.player.hp < hp_before, "lava must damage the player");
+        assert!(g
+            .messages
+            .all()
+            .iter()
+            .any(|m| m.text.starts_with("The lava sears you")));
+    }
+
+    #[test]
     fn bad_mushroom_can_poison_the_player() {
         let mut g = Game::new_test("Test", "Human", "Warrior", 42);
         g.monsters.clear();
@@ -1310,11 +1694,9 @@ mod tests {
             if g.statuses.poison > 0 {
                 break;
             }
-            g.player
-                .inventory
-                .push(crate::items::catalog::make_food(
-                    crate::items::item::FoodKind::Mushroom,
-                ));
+            g.player.inventory.push(crate::items::catalog::make_food(
+                crate::items::item::FoodKind::Mushroom,
+            ));
             g.eat_item(g.player.inventory.len() - 1);
         }
         assert!(

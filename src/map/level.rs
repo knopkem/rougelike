@@ -8,6 +8,30 @@ use crate::items::item::Item;
 pub const MAP_W: u8 = 80;
 pub const MAP_H: u8 = 25;
 
+/// The six planned trap types (PLAN §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TrapKind {
+    Arrow,
+    Dart,
+    FallingItem,
+    Teleport,
+    SleepGas,
+    AcidPool,
+}
+
+impl TrapKind {
+    pub fn name(&self) -> &'static str {
+        match self {
+            TrapKind::Arrow => "arrow",
+            TrapKind::Dart => "dart",
+            TrapKind::FallingItem => "falling",
+            TrapKind::Teleport => "teleport",
+            TrapKind::SleepGas => "sleep gas",
+            TrapKind::AcidPool => "acid pool",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tile {
     Wall,
@@ -20,6 +44,7 @@ pub enum Tile {
     Lava,
     SporeGas,
     Grate,
+    Trap(TrapKind),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,7 +68,7 @@ impl LevelTheme {
         }
     }
 
-   pub fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             LevelTheme::BarrowHalls => "The Barrow Halls",
             LevelTheme::FungalGrottos => "The Fungal Grottos",
@@ -69,6 +94,10 @@ pub struct Level {
     pub stairs_up: Option<(u8, u8)>,
     pub stairs_down: Option<(u8, u8)>,
     pub player_start: (u8, u8),
+    /// Door tile of the D2 shop room (seam for the merchant, issue 16).
+    pub shop_room: Option<(u8, u8)>,
+    /// Door tile of the D15 boss arena (seam for the boss, issue 19).
+    pub boss_arena: Option<(u8, u8)>,
 }
 
 impl Level {
@@ -85,6 +114,8 @@ impl Level {
             stairs_up: None,
             stairs_down: None,
             player_start: (MAP_W / 2, MAP_H / 2),
+            shop_room: None,
+            boss_arena: None,
         }
     }
 
@@ -117,18 +148,42 @@ impl Level {
         }
     }
 
+    /// Whether a tile can be stood on. Closed and locked doors block
+    /// movement (they must be opened/unlocked first); water, lava and
+    /// spore gas are enterable but harmful (the turn handler applies
+    /// their effects).
     pub fn is_walkable(&self, pos: (u8, u8)) -> bool {
-        match self.tile_at(pos) {
-            Tile::Floor | Tile::StairsUp | Tile::StairsDown | Tile::DoorClosed | Tile::Water | Tile::Lava | Tile::SporeGas => true,
-            _ => false,
-        }
+        matches!(
+            self.tile_at(pos),
+            Tile::Floor
+                | Tile::StairsUp
+                | Tile::StairsDown
+                | Tile::Water
+                | Tile::Lava
+                | Tile::SporeGas
+                | Tile::Grate
+                | Tile::Trap(_)
+        )
     }
 
     pub fn is_transparent(&self, pos: (u8, u8)) -> bool {
+        !matches!(
+            self.tile_at(pos),
+            Tile::Wall | Tile::DoorClosed | Tile::DoorLocked
+        )
+    }
+
+    /// The trap kind sitting on the tile, if any.
+    pub fn trap_at(&self, pos: (u8, u8)) -> Option<TrapKind> {
         match self.tile_at(pos) {
-            Tile::Wall | Tile::DoorClosed | Tile::DoorLocked => false,
-            _ => true,
+            Tile::Trap(k) => Some(k),
+            _ => None,
         }
+    }
+
+    /// Whether the tile holds a door (closed or locked).
+    pub fn is_door(&self, pos: (u8, u8)) -> bool {
+        matches!(self.tile_at(pos), Tile::DoorClosed | Tile::DoorLocked)
     }
 
     pub fn center(&self) -> (u8, u8) {

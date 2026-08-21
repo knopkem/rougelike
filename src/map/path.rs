@@ -1,8 +1,8 @@
 //! A* pathfinding on the level grid.
 
 use crate::map::level::Level;
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 #[derive(Clone, Copy)]
 struct Node {
@@ -46,7 +46,17 @@ fn heuristic(a: (u8, u8), b: (u8, u8)) -> f64 {
 pub fn astar(level: &Level, start: (u8, u8), goal: (u8, u8)) -> Option<Vec<(u8, u8)>> {
     if !level.is_walkable(goal) {
         // Allow goal on stairs which are walkable.
-        if !matches!(level.tile_at(goal), crate::map::level::Tile::Floor | crate::map::level::Tile::StairsUp | crate::map::level::Tile::StairsDown | crate::map::level::Tile::Water | crate::map::level::Tile::Lava) {
+        if !matches!(
+            level.tile_at(goal),
+            crate::map::level::Tile::Floor
+                | crate::map::level::Tile::StairsUp
+                | crate::map::level::Tile::StairsDown
+                | crate::map::level::Tile::Water
+                | crate::map::level::Tile::Lava
+                | crate::map::level::Tile::SporeGas
+                | crate::map::level::Tile::Grate
+                | crate::map::level::Tile::Trap(_)
+        ) {
             return None;
         }
     }
@@ -83,10 +93,7 @@ pub fn astar(level: &Level, start: (u8, u8), goal: (u8, u8)) -> Option<Vec<(u8, 
             let mut path = Vec::new();
             let mut cur = goal_i;
             if cur != start_i {
-                path.push((
-                    (cur % w) as u8,
-                    (cur / w) as u8,
-                ));
+                path.push(((cur % w) as u8, (cur / w) as u8));
             }
             while cur != start_i {
                 if let Some(parent) = came[cur] {
@@ -95,10 +102,7 @@ pub fn astar(level: &Level, start: (u8, u8), goal: (u8, u8)) -> Option<Vec<(u8, 
                     break;
                 }
                 if cur != start_i {
-                    path.push((
-                        (cur % w) as u8,
-                        (cur / w) as u8,
-                    ));
+                    path.push(((cur % w) as u8, (cur / w) as u8));
                 }
             }
             path.reverse();
