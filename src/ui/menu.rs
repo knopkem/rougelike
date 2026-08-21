@@ -114,19 +114,29 @@ pub fn render_death(frame: &mut Frame, score: u64, depth: u8, level: u8) {
     );
 }
 
-pub fn render_victory(frame: &mut Frame, score: u64, turns: u64) {
-    let area = frame.area();
-    let lines = vec![
-        Line::from(Span::styled(
-            "  VICTORY!",
-            Style::default().fg(Color::Yellow).bg(Color::Black).bold(),
-        )),
-        Line::from(Span::raw("  You raised the Amulet of the Abyss!")),
-        Line::from(Span::raw("")),
-        Line::from(Span::raw(format!("  Score: {score}   Turns: {turns}"))),
-        Line::from(Span::raw("")),
-        Line::from(Span::raw("  [Enter] return to title")),
-    ];
+pub fn render_victory(
+     frame: &mut Frame,
+     score: u64,
+     turns: u64,
+     can_endless: bool,
+ ) {
+     let area = frame.area();
+     let prompt = if can_endless {
+         "  [C]ontinue in endless mode   [Enter] return to title"
+     } else {
+         "  [Enter] return to title"
+     };
+     let lines = vec![
+         Line::from(Span::styled(
+             "  VICTORY!",
+             Style::default().fg(Color::Yellow).bg(Color::Black).bold(),
+         )),
+         Line::from(Span::raw("  You raised the Amulet of the Abyss!")),
+         Line::from(Span::raw("")),
+         Line::from(Span::raw(format!("  Score: {score}   Turns: {turns}"))),
+         Line::from(Span::raw("")),
+         Line::from(Span::raw(prompt)),
+     ];
     let para = Paragraph::new(lines);
     frame.render_widget(
         para,

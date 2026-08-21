@@ -172,6 +172,28 @@ mod tests {
     }
 
     #[test]
+    fn endless_scaling_applies_beyond_depth_25() {
+        let non_unique = |endless: bool| {
+            let mut rng = Rng::new(99);
+            loop {
+                let m = spawn_monster(&mut rng, 30, endless);
+                if !m.is_unique {
+                    return m;
+                }
+            }
+        };
+        // Endless: +5 HP and +10 XP per depth past 25.
+        let m = non_unique(true);
+        assert_eq!(m.max_hp, m.def.hp + 25, "endless HP scaling");
+        assert_eq!(m.hp, m.max_hp);
+        assert_eq!(m.xp, m.def.xp + 50, "endless XP scaling");
+        // Not endless: base stats unchanged beyond the cap.
+        let m = non_unique(false);
+        assert_eq!(m.max_hp, m.def.hp, "no scaling without endless mode");
+        assert_eq!(m.xp, m.def.xp, "no scaling without endless mode");
+    }
+
+    #[test]
     fn monster_survives_json_roundtrip() {
         let m = sample();
         let json = serde_json::to_string(&m).unwrap();

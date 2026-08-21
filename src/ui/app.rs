@@ -86,6 +86,20 @@ impl App {
         self.screen = Screen::Play;
     }
 
+    /// Resume the run in endless mode from the victory screen: the descent
+    /// past the max depth is unlocked and the spawn scaling goes live.
+    /// (No autosave: a won run is excluded from autosaves by design.)
+    pub fn continue_endless(&mut self) {
+        if let Some(game) = &mut self.game {
+            game.endless = true;
+            game.log(
+                crate::core::message::MessageKind::System,
+                "Endless descent. The dungeon stretches on below.",
+            );
+        }
+        self.screen = Screen::Play;
+    }
+
     /// Map a key event to a game action during play.
     pub fn handle_play_key(&mut self, key: KeyEvent) -> Option<Action> {
         if key.kind != KeyEventKind::Press {
@@ -343,6 +357,22 @@ mod tests {
         app.handle_play_key(key(KeyCode::Char('D')));
         assert_eq!(app.handle_play_key(key(KeyCode::Esc)), None);
         assert!(app.picker.is_none());
+    }
+
+    #[test]
+    fn continue_endless_from_victory_sets_flag_and_resumes_play() {
+        let mut app = app_with(vec![], None);
+        let mut game = app.game.take().unwrap();
+        game.won = true;
+        app.game = Some(game);
+        app.screen = Screen::Victory;
+        assert!(!app.game.as_ref().unwrap().endless);
+        app.continue_endless();
+        assert_eq!(app.screen, Screen::Play);
+        assert!(
+            app.game.as_ref().unwrap().endless,
+            "continuing from victory must enable endless mode"
+        );
     }
 
     #[test]

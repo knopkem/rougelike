@@ -655,8 +655,11 @@ impl Game {
             );
             return false;
         }
-        let next = self.current_level + 1;
-        if next > MAX_LEVELS {
+        // Endless mode lifts the max-depth cap; the u8 cap still bounds it.
+        let Some(next) = self.current_level.checked_add(1) else {
+            return false;
+        };
+        if !self.endless && next > MAX_LEVELS {
             return false;
         }
         self.current_level = next;
@@ -1681,6 +1684,32 @@ mod tests {
             .all()
             .iter()
             .any(|m| m.text.starts_with("The lava sears you")));
+    }
+
+    #[test]
+    fn endless_mode_lifts_the_max_depth_cap_on_descend() {
+        for endless in [false, true] {
+            let mut g = Game::new_test("Test", "Human", "Warrior", 42);
+            g.current_level = 26;
+            g.endless = endless;
+            g.monsters.clear();
+            let level = g.ensure_level(26);
+            let down = level.stairs_down.expect("generated levels have down stairs");
+            g.player.pos = down;
+            g.do_turn(crate::core::action::Action::StairsDown);
+            if endless {
+                assert_eq!(g.current_level, 27, "endless must lift the max-depth cap");
+                assert!(
+                    g.levels.contains_key(&27),
+                    "the level beyond the cap must be generated"
+                );
+            } else {
+                assert_eq!(
+                    g.current_level, 26,
+                    "the max-depth cap must hold without endless mode"
+                );
+            }
+        }
     }
 
     #[test]

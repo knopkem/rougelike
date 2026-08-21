@@ -38,7 +38,7 @@ fn main() -> io::Result<()> {
                     if app.screen == Screen::Death {
                         menu::render_death(f, s, game.current_level, game.player.level);
                     } else {
-                        menu::render_victory(f, s, game.turn);
+                        menu::render_victory(f, s, game.turn, !game.endless);
                     }
                 }
             }
@@ -91,7 +91,7 @@ fn main() -> io::Result<()> {
                             game.do_turn(action);
                             if !game.alive {
                                 app.screen = Screen::Death;
-                            } else if game.won {
+                            } else if game.won && !game.endless {
                                 app.screen = Screen::Victory;
                             }
                             for ev in game.drain_events() {
@@ -103,6 +103,15 @@ fn main() -> io::Result<()> {
                 }
                 Screen::Death | Screen::Victory => {
                     match key.code {
+                        KeyCode::Char('c') | KeyCode::Char('C')
+                            if app.screen == Screen::Victory
+                                && app
+                                    .game
+                                    .as_ref()
+                                    .is_some_and(|g| g.won && !g.endless) =>
+                        {
+                            app.continue_endless();
+                        }
                         KeyCode::Enter => {
                             app.game = None;
                             app.screen = Screen::Title;
