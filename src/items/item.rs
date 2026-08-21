@@ -130,7 +130,10 @@ impl Item {
         if self.identified {
             self.name_str.clone()
         } else {
-            format!("unidentified {}", self.name_str.split(' ').next().unwrap_or("item"))
+            format!(
+                "unidentified {}",
+                self.name_str.split(' ').next().unwrap_or("item")
+            )
         }
     }
 

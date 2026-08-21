@@ -57,19 +57,14 @@ pub fn act<'a>(rng: &mut Rng, game: &mut AiGame<'a>, monster: &Monster) -> Optio
             m_pos.1 as i32,
             player_pos.0 as i32,
             player_pos.1 as i32,
-        )
-    {
+        ) {
         false
     } else {
         rng.chance(40)
     };
     if sees {
         // Chase via A*.
-        if let Some(path) = path::astar(
-            game.level,
-            m_pos,
-            player_pos,
-        ) {
+        if let Some(path) = path::astar(game.level, m_pos, player_pos) {
             if let Some(next) = path.first().copied() {
                 return Some(AiDecision::MoveTo(next));
             }
@@ -83,10 +78,7 @@ pub fn act<'a>(rng: &mut Rng, game: &mut AiGame<'a>, monster: &Monster) -> Optio
         let ny = (m_pos.1 as i32 + dy as i32) as u8;
         if game.level.is_walkable((nx, ny))
             && game.player_pos != (nx, ny)
-            && !game
-                .monsters
-                .iter()
-                .any(|o| o.pos == (nx, ny) && !o.dead)
+            && !game.monsters.iter().any(|o| o.pos == (nx, ny) && !o.dead)
         {
             return Some(AiDecision::MoveTo((nx, ny)));
         }

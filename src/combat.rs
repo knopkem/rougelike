@@ -19,12 +19,7 @@ impl Combat {
         Self { rng }
     }
 
-    pub fn player_attacks(
-        &mut self,
-        p: &Player,
-        m: &Monster,
-        to_hit_penalty: u64,
-    ) -> HitResult {
+    pub fn player_attacks(&mut self, p: &Player, m: &Monster, to_hit_penalty: u64) -> HitResult {
         let to_hit = p.to_hit().saturating_sub(to_hit_penalty);
         let roll = self.rng.int(0..100);
         let hit = roll < to_hit;
@@ -37,11 +32,7 @@ impl Combat {
         }
         // Weapon damage die, in faces (a d4 rolls 1..=4); unarmed fights
         // with a 1d4. The monster side keeps its legacy roll convention.
-        let die = p
-            .wielded
-            .as_ref()
-            .map(|w| w.defense)
-            .unwrap_or(4);
+        let die = p.wielded.as_ref().map(|w| w.defense).unwrap_or(4);
         let mut dmg = self.rng.int_inclusive(1..=die as u64) as u8;
         let crit = self.rng.chance(p.crit_chance());
         if crit {
@@ -50,11 +41,7 @@ impl Combat {
         let ac = m.def.ac;
         let dmg = dmg.saturating_sub((ac / 2) as u8);
         // Weapon enchant is a flat damage bonus, applied after AC reduction.
-        let enchant = p
-            .wielded
-            .as_ref()
-            .map(|w| w.enchant as i32)
-            .unwrap_or(0);
+        let enchant = p.wielded.as_ref().map(|w| w.enchant as i32).unwrap_or(0);
         let dmg = (dmg as i32 + enchant).max(0) as u8;
         HitResult {
             hit: true,

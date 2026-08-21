@@ -1694,7 +1694,9 @@ mod tests {
             g.endless = endless;
             g.monsters.clear();
             let level = g.ensure_level(26);
-            let down = level.stairs_down.expect("generated levels have down stairs");
+            let down = level
+                .stairs_down
+                .expect("generated levels have down stairs");
             g.player.pos = down;
             g.do_turn(crate::core::action::Action::StairsDown);
             if endless {

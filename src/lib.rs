@@ -1,18 +1,20 @@
 // Deepdelve — a terminal roguelike in Rust.
 
 pub mod audio;
+pub mod cli;
 pub mod combat;
 pub mod core;
 pub mod data;
 pub mod entities;
-pub mod items;
-pub mod map;
 pub mod hiscore;
+pub mod items;
 pub mod magic;
+pub mod map;
 pub mod quest;
 pub mod save;
 pub mod shop;
 pub mod status;
+pub mod terminal;
 pub mod ui;
 
 pub use combat::Combat;
@@ -38,11 +40,8 @@ pub mod tests_harness {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let dir = std::env::temp_dir().join(format!(
-            "deepdelve-test-{}-{}",
-            std::process::id(),
-            name
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("deepdelve-test-{}-{}", std::process::id(), name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let previous = std::env::var("XDG_DATA_HOME").ok();

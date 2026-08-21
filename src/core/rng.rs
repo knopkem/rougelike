@@ -98,7 +98,7 @@ pub trait RngLike {
 }
 
 impl RngLike for Rng {
- fn u64(&mut self) -> u64 {
+    fn u64(&mut self) -> u64 {
         self.u64()
     }
     fn int(&mut self, range: std::ops::Range<u64>) -> u64 {

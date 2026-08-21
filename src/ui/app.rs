@@ -57,6 +57,12 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        Self::with_sfx(SfxEngine::new())
+    }
+
+    /// Build the app with a pre-built SFX engine (e.g. a disabled one for
+    /// `--no-audio`, so no audio device is ever probed).
+    pub fn with_sfx(sfx: SfxEngine) -> Self {
         Self {
             screen: Screen::Title,
             game: None,
@@ -64,19 +70,14 @@ impl App {
             picker: None,
             targeting: None,
             creation: Creation::default(),
-            sfx: SfxEngine::new(),
+            sfx,
             quit_requested: false,
         }
     }
 
     pub fn start_game(&mut self, seed: u64) {
         let c = &self.creation;
-        let game = Game::new(
-            seed,
-            &c.name,
-            c.race.name(),
-            c.class.name(),
-        );
+        let game = Game::new(seed, &c.name, c.race.name(), c.class.name());
         self.game = Some(game);
         self.screen = Screen::Play;
     }
@@ -122,16 +123,14 @@ impl App {
                                     .game
                                     .as_ref()
                                     .and_then(|g| g.player.inventory.get(s))
-                                    .map(|i| matches!(i.kind, crate::items::item::ItemKind::Wand(_)))
+                                    .map(|i| {
+                                        matches!(i.kind, crate::items::item::ItemKind::Wand(_))
+                                    })
                                     .unwrap_or(false) =>
                             {
                                 if let Some(game) = &self.game {
                                     let (x, y) = game.player.pos;
-                                    self.targeting = Some(Targeting {
-                                        x,
-                                        y,
-                                        wand_slot: s,
-                                    });
+                                    self.targeting = Some(Targeting { x, y, wand_slot: s });
                                 }
                                 None
                             }
@@ -321,8 +320,14 @@ mod tests {
             app.handle_play_key(key(KeyCode::Char('u'))),
             Some(Action::Move(1, -1))
         );
-        assert_eq!(app.handle_play_key(key(KeyCode::Char('g'))), Some(Action::Pickup));
-        assert_eq!(app.handle_play_key(key(KeyCode::Char('.'))), Some(Action::Wait));
+        assert_eq!(
+            app.handle_play_key(key(KeyCode::Char('g'))),
+            Some(Action::Pickup)
+        );
+        assert_eq!(
+            app.handle_play_key(key(KeyCode::Char('.'))),
+            Some(Action::Wait)
+        );
         assert!(!app.quit_requested);
         assert_eq!(app.handle_play_key(key(KeyCode::Char('q'))), None);
         assert!(app.quit_requested, "quit stays on q");
@@ -348,7 +353,10 @@ mod tests {
         let mut app = app_with(items, None);
         app.handle_play_key(key(KeyCode::Char('D')));
         assert_eq!(app.handle_play_key(key(KeyCode::Char('j'))), None);
-        assert_eq!(app.handle_play_key(key(KeyCode::Enter)), Some(Action::Drop(1)));
+        assert_eq!(
+            app.handle_play_key(key(KeyCode::Enter)),
+            Some(Action::Drop(1))
+        );
     }
 
     #[test]
@@ -386,7 +394,12 @@ mod tests {
 
     #[test]
     fn takeoff_picker_targets_equipment_slots() {
-        let w = catalog::make_weapon(WeaponKind::Dagger, 0, false, &mut crate::core::rng::Rng::new(1));
+        let w = catalog::make_weapon(
+            WeaponKind::Dagger,
+            0,
+            false,
+            &mut crate::core::rng::Rng::new(1),
+        );
         let a = catalog::make_armor(ArmorKind::Chainmail, 0, false);
         let r1 = catalog::make_ring(RingKind::Protection);
         let r2 = catalog::make_ring(RingKind::Energy);
@@ -424,19 +437,28 @@ mod tests {
         let r2 = catalog::make_ring(RingKind::Energy);
         let mut app = app_with(
             vec![],
-            Some(
-                (
-                    catalog::make_weapon(WeaponKind::Dagger, 0, false, &mut crate::core::rng::Rng::new(1)),
-                    catalog::make_armor(ArmorKind::Chainmail, 0, false),
-                    vec![r1, r2],
+            Some((
+                catalog::make_weapon(
+                    WeaponKind::Dagger,
+                    0,
+                    false,
+                    &mut crate::core::rng::Rng::new(1),
                 ),
-            ),
+                catalog::make_armor(ArmorKind::Chainmail, 0, false),
+                vec![r1, r2],
+            )),
         );
         app.handle_play_key(key(KeyCode::Char('O')));
-        assert_eq!(app.handle_play_key(key(KeyCode::Enter)), Some(Action::RingOff(0)));
+        assert_eq!(
+            app.handle_play_key(key(KeyCode::Enter)),
+            Some(Action::RingOff(0))
+        );
         app.handle_play_key(key(KeyCode::Char('O')));
         assert_eq!(app.handle_play_key(key(KeyCode::Char('j'))), None);
-        assert_eq!(app.handle_play_key(key(KeyCode::Enter)), Some(Action::RingOff(1)));
+        assert_eq!(
+            app.handle_play_key(key(KeyCode::Enter)),
+            Some(Action::RingOff(1))
+        );
     }
 
     #[test]

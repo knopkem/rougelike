@@ -6,3 +6,4 @@ pub mod game;
 pub mod message;
 pub mod rng;
 pub mod score;
+pub mod sim;

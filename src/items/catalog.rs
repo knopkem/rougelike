@@ -98,7 +98,11 @@ pub fn make_wand(kind: WandKind, enchant: i8) -> Item {
 pub fn make_potion(kind: PotionKind) -> Item {
     let name = match kind {
         PotionKind::Healing(small) => {
-            if small { "potion of healing" } else { "potion of super healing" }
+            if small {
+                "potion of healing"
+            } else {
+                "potion of super healing"
+            }
         }
         PotionKind::CurePoison => "potion of cure poison",
         PotionKind::Restore => "potion of restore",

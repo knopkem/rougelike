@@ -31,7 +31,11 @@ pub fn saw(freq: f32, len: usize) -> Vec<f32> {
     for i in 0..len {
         let t = i as f32 / SAMPLE_RATE as f32;
         let phase = (freq * t) % 1.0;
-        out.push(if phase < 0.5 { 4.0 * phase - 1.0 } else { 4.0 * (1.0 - phase) - 1.0 });
+        out.push(if phase < 0.5 {
+            4.0 * phase - 1.0
+        } else {
+            4.0 * (1.0 - phase) - 1.0
+        });
     }
     out
 }
@@ -49,13 +53,7 @@ pub fn noise(len: usize) -> Vec<f32> {
 }
 
 /// ADSR envelope: attack, decay, sustain, release.
-pub fn adsr(
-    len: usize,
-    attack: f32,
-    decay: f32,
-    sustain: f32,
-    release: f32,
-) -> Vec<f32> {
+pub fn adsr(len: usize, attack: f32, decay: f32, sustain: f32, release: f32) -> Vec<f32> {
     let mut out = Vec::with_capacity(len);
     let a = (attack * SAMPLE_RATE as f32) as usize;
     let d = (decay * SAMPLE_RATE as f32) as usize;

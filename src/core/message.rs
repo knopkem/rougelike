@@ -75,9 +75,6 @@ mod tests {
             log.push(i, MessageKind::Normal, format!("m{i}"));
         }
         let t = log.tail(3);
-        assert_eq!(
-            t.iter().map(|m| m.turn).collect::<Vec<_>>(),
-            vec![2, 3, 4]
-        );
+        assert_eq!(t.iter().map(|m| m.turn).collect::<Vec<_>>(), vec![2, 3, 4]);
     }
 }

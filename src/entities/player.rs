@@ -16,7 +16,7 @@ pub struct Player {
     pub max_hp: u8,
     pub ep: u8,
     pub max_ep: u8,
-    pub   hunger: u16,
+    pub hunger: u16,
     pub gold: u32,
     pub kills: u32,
     /// Attributes.
@@ -120,21 +120,13 @@ impl Player {
 
     pub fn to_hit(&self) -> u64 {
         let base = 50 + self.dex as u64 * 2;
-        let weapon_bonus = self
-            .wielded
-            .as_ref()
-            .map(|w| w.enchant as u64)
-            .unwrap_or(0);
+        let weapon_bonus = self.wielded.as_ref().map(|w| w.enchant as u64).unwrap_or(0);
         base + weapon_bonus
     }
 
     pub fn ac(&self) -> u64 {
         let base = 10 + self.dex as u64 / 2;
-        let armor = self
-            .armor
-            .as_ref()
-            .map(|a| a.defense as u64)
-            .unwrap_or(0);
+        let armor = self.armor.as_ref().map(|a| a.defense as u64).unwrap_or(0);
         base + armor
     }
 

@@ -54,7 +54,11 @@ const SHADOW_DIRECTIONS: [(i32, i32); 8] = [
 ];
 
 fn set_seen(level: &mut Level, x: i32, y: i32) {
-    if x < 0 || y < 0 || x >= crate::map::level::MAP_W as i32 || y >= crate::map::level::MAP_H as i32 {
+    if x < 0
+        || y < 0
+        || x >= crate::map::level::MAP_W as i32
+        || y >= crate::map::level::MAP_H as i32
+    {
         return;
     }
     let i = Level::idx(x as u8, y as u8);

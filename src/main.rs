@@ -1,9 +1,12 @@
 //! Deepdelve — a terminal roguelike in Rust.
 
-use crossterm::event::{self, KeyCode};
 use std::io;
 use std::time::Duration;
 
+use crossterm::event::{self, KeyCode};
+
+use deepdelve::audio::sfx::SfxEngine;
+use deepdelve::core::game::Game;
 use deepdelve::core::score;
 use deepdelve::save;
 use deepdelve::ui::app::{App, Screen};
@@ -11,11 +14,50 @@ use deepdelve::ui::menu;
 use deepdelve::ui::panels;
 use deepdelve::ui::render;
 
-fn main() -> io::Result<()> {
-    crossterm::terminal::enable_raw_mode()?;
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+const USAGE: &str = "Usage: deepdelve [OPTIONS]
+
+Options:
+  --seed <u64>   Use an explicit run seed (default: generated)
+  --headless     Run the game loop without the curses UI
+  --no-audio     Start with audio disabled
+  -h, --help     Show this help
+";
+
+fn main() {
+    let args = match deepdelve::cli::parse(std::env::args().skip(1).collect::<Vec<String>>()) {
+        Ok(Some(args)) => args,
+        Ok(None) => {
+            print!("{USAGE}");
+            return;
+        }
+        Err(e) => {
+            eprintln!("deepdelve: {e}");
+            eprint!("{USAGE}");
+            std::process::exit(2);
+        }
+    };
+    let seed = args.seed.unwrap_or_else(deepdelve::cli::generated_seed);
+    eprintln!("deepdelve: seed {seed}");
+    if args.headless {
+        run_headless(seed, args.no_audio);
+        return;
+    }
+    if let Err(e) = run_ui(seed, args.no_audio) {
+        eprintln!("deepdelve: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// Interactive session: curses UI driving the app state machine.
+fn run_ui(seed: u64, no_audio: bool) -> io::Result<()> {
+    deepdelve::terminal::install_panic_hook();
+    deepdelve::terminal::Guard::enter()?;
     let mut terminal = ratatui::init();
-    let mut app: App = App::new();
+    let mut app = if no_audio {
+        App::with_sfx(SfxEngine::disabled())
+    } else {
+        App::new()
+    };
 
     loop {
         terminal.draw(|f| match app.screen {
@@ -73,13 +115,7 @@ fn main() -> io::Result<()> {
                     _ => {}
                 },
                 Screen::Creation => match key.code {
-                    KeyCode::Enter => {
-                        let seed = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as u64)
-                            .unwrap_or(0);
-                        app.start_game(seed);
-                    }
+                    KeyCode::Enter => app.start_game(seed),
                     KeyCode::Esc => {
                         app.screen = Screen::Title;
                     }
@@ -101,32 +137,54 @@ fn main() -> io::Result<()> {
                         }
                     }
                 }
-                Screen::Death | Screen::Victory => {
-                    match key.code {
-                        KeyCode::Char('c') | KeyCode::Char('C')
-                            if app.screen == Screen::Victory
-                                && app
-                                    .game
-                                    .as_ref()
-                                    .is_some_and(|g| g.won && !g.endless) =>
-                        {
-                            app.continue_endless();
-                        }
-                        KeyCode::Enter => {
-                            app.game = None;
-                            app.screen = Screen::Title;
-                        }
-                        KeyCode::Char('q') | KeyCode::Char('Q') => {
-                            app.quit_requested = true;
-                        }
-                        _ => {}
+                Screen::Death | Screen::Victory => match key.code {
+                    KeyCode::Char('c') | KeyCode::Char('C')
+                        if app.screen == Screen::Victory
+                            && app.game.as_ref().is_some_and(|g| g.won && !g.endless) =>
+                    {
+                        app.continue_endless();
                     }
-                }
+                    KeyCode::Enter => {
+                        app.game = None;
+                        app.screen = Screen::Title;
+                    }
+                    KeyCode::Char('q') | KeyCode::Char('Q') => {
+                        app.quit_requested = true;
+                    }
+                    _ => {}
+                },
             }
         }
     }
 
-    crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
-    crossterm::terminal::disable_raw_mode()?;
+    // The terminal guard (Drop) and the panic hook restore the terminal.
     Ok(())
+}
+
+/// Headless session: no curses, no raw mode — the simulation driver
+/// (`core::sim`) feeds the same `do_turn`/event path until the run ends.
+fn run_headless(seed: u64, no_audio: bool) {
+    let mut sfx = if no_audio {
+        SfxEngine::disabled()
+    } else {
+        SfxEngine::new()
+    };
+    let mut game = Game::new(seed, "Deepdelver", "Human", "Warrior");
+    let end = deepdelve::core::sim::run_turns(
+        &mut game,
+        10_000,
+        |_turn, _game| Some(deepdelve::core::action::Action::Wait),
+        |ev| sfx.play_event(ev),
+    );
+    let score = score::compute(&game);
+    let end = match end {
+        deepdelve::core::sim::RunEnd::Death => "death",
+        deepdelve::core::sim::RunEnd::Victory => "victory",
+        deepdelve::core::sim::RunEnd::Exhausted => "exhausted",
+        deepdelve::core::sim::RunEnd::TurnLimit => "turn limit",
+    };
+    println!(
+        "seed {} — {} after {} turns (D{}, {} kills, score {})",
+        seed, end, game.turn, game.current_level, game.player.kills, score,
+    );
 }

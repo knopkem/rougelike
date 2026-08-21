@@ -7,7 +7,8 @@ pub fn initial_quests() -> Vec<Quest> {
         Quest {
             id: 1,
             name: "The Lost Signet".to_string(),
-            description: "An old man seeks his signet ring, lost with a named guard on D2.".to_string(),
+            description: "An old man seeks his signet ring, lost with a named guard on D2."
+                .to_string(),
             status: QuestStatus::Offered,
             progress: 0,
             target: 1,

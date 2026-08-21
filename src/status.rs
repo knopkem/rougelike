@@ -1,7 +1,7 @@
 //! Status effects + hunger states.
 
-use serde::{Deserialize, Serialize};
 use crate::entities::player::Player;
+use serde::{Deserialize, Serialize};
 
 /// Hunger ladder: well-fed → hungry → starving (HP drain) → weak (no regen,
 /// -to-hit) → dying (escalated HP drain). The bottom three stages all sit at
@@ -292,25 +292,22 @@ mod tests {
 
     #[test]
     fn hunger_ladder_starts_well_fed() {
-        assert_eq!(
-            Statuses::hunger_state(1000, 0),
-            HungerState::WellFed
-        );
+        assert_eq!(Statuses::hunger_state(1000, 0), HungerState::WellFed);
         assert_eq!(Statuses::hunger_state(401, 0), HungerState::WellFed);
         assert_eq!(Statuses::hunger_state(400, 0), HungerState::Hungry);
         assert_eq!(Statuses::hunger_state(100, 0), HungerState::Hungry);
         assert_eq!(Statuses::hunger_state(1, 0), HungerState::Hungry);
         assert_eq!(Statuses::hunger_state(0, 0), HungerState::Starving);
         assert_eq!(Statuses::hunger_state(0, 10), HungerState::Starving);
-        assert_eq!(Statuses::hunger_state(0, STARVING_WEAK_AFTER), HungerState::Weak);
+        assert_eq!(
+            Statuses::hunger_state(0, STARVING_WEAK_AFTER),
+            HungerState::Weak
+        );
         assert_eq!(
             Statuses::hunger_state(0, STARVING_DYING_AFTER),
             HungerState::Dying
         );
-        assert_eq!(
-            Statuses::hunger_state(0, u8::MAX),
-            HungerState::Dying
-        );
+        assert_eq!(Statuses::hunger_state(0, u8::MAX), HungerState::Dying);
     }
 
     #[test]
@@ -390,6 +387,10 @@ mod tests {
         p.hunger = 300; // Hungry: no regen to revive a fatal tick
         let cause = s.tick(&mut p);
         assert_eq!(p.hp, 0);
-        assert_eq!(cause, Some(DeathCause::Other), "disease deals damage after poison");
+        assert_eq!(
+            cause,
+            Some(DeathCause::Other),
+            "disease deals damage after poison"
+        );
     }
 }

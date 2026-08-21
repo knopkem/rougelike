@@ -197,9 +197,7 @@ mod tests {
     use super::*;
     use crate::core::game::Game;
     use crate::items::catalog;
-    use crate::items::item::{
-        ArmorKind, PotionKind, RingKind, ScrollKind, WandKind, WeaponKind,
-    };
+    use crate::items::item::{ArmorKind, PotionKind, RingKind, ScrollKind, WandKind, WeaponKind};
 
     fn game_with(pick: fn(&mut Game)) -> Game {
         let mut g = Game::new_test("T", "Human", "Warrior", 42);
@@ -311,7 +309,9 @@ mod tests {
                 &mut g.rng,
             ));
             g.player.armor = Some(catalog::make_armor(ArmorKind::Chainmail, 0, false));
-            g.player.rings.push(catalog::make_ring(RingKind::Protection));
+            g.player
+                .rings
+                .push(catalog::make_ring(RingKind::Protection));
             add(g, catalog::make_potion(PotionKind::Healing(true)));
         });
         let mut picker = Picker::new(PickerKind::TakeOff, &g).unwrap();
@@ -319,10 +319,7 @@ mod tests {
             picker.rows.iter().map(|r| r.slot).collect::<Vec<_>>(),
             vec![0, 1, 2]
         );
-        assert_eq!(
-            picker.selected_action(),
-            Some(Action::TakeOff(0))
-        );
+        assert_eq!(picker.selected_action(), Some(Action::TakeOff(0)));
         picker.move_down();
         picker.move_down();
         assert_eq!(picker.selected_action(), Some(Action::TakeOff(2)));
@@ -331,7 +328,9 @@ mod tests {
     #[test]
     fn ringoff_maps_equipment_slot_to_ring_index() {
         let g = game_with(|g| {
-            g.player.rings.push(catalog::make_ring(RingKind::Protection));
+            g.player
+                .rings
+                .push(catalog::make_ring(RingKind::Protection));
             g.player.rings.push(catalog::make_ring(RingKind::Energy));
         });
         let mut picker = Picker::new(PickerKind::RingOff, &g).unwrap();

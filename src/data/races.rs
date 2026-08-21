@@ -9,12 +9,7 @@ pub enum RaceId {
 }
 
 impl RaceId {
-    pub const ALL: [RaceId; 4] = [
-        RaceId::Human,
-        RaceId::Elf,
-        RaceId::Dwarf,
-        RaceId::Halfling,
-    ];
+    pub const ALL: [RaceId; 4] = [RaceId::Human, RaceId::Elf, RaceId::Dwarf, RaceId::Halfling];
 
     pub fn name(&self) -> &'static str {
         match self {

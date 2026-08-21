@@ -25,7 +25,13 @@ pub enum Action {
     /// Fire a wand at a tile.
     FireWand(usize, u8, u8),
     Talk(String),
-    Buy { item: usize, price: u32 },
-    Sell { item: usize, price: u32 },
+    Buy {
+        item: usize,
+        price: u32,
+    },
+    Sell {
+        item: usize,
+        price: u32,
+    },
     Identify(usize),
 }

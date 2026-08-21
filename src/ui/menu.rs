@@ -1,11 +1,11 @@
 //! Menu screens: title, character creation, death, victory.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::data::classes::ClassId;
@@ -24,21 +24,22 @@ pub fn render_title(frame: &mut Frame, has_save: bool) {
         Line::from(Span::raw("  Find the Amulet of the Abyss on depth 25.")),
         Line::from(Span::raw("  Descend. Survive. Escape with your life.")),
         Line::from(Span::raw("")),
-        Line::from(Span::raw(
-            if has_save {
-                "  [N]ew game   [L]oad   [Q]uit"
-            } else {
-                "  [N]ew game   [Q]uit"
-            },
-        )),
+        Line::from(Span::raw(if has_save {
+            "  [N]ew game   [L]oad   [Q]uit"
+        } else {
+            "  [N]ew game   [Q]uit"
+        })),
     ];
     let para = Paragraph::new(lines);
-    frame.render_widget(para, Rect {
-        x: area.x,
-        y: area.y + area.height / 4,
-        width: area.width,
-        height: (area.height / 2).min(area.height),
-    });
+    frame.render_widget(
+        para,
+        Rect {
+            x: area.x,
+            y: area.y + area.height / 4,
+            width: area.width,
+            height: (area.height / 2).min(area.height),
+        },
+    );
 }
 
 pub fn render_creation(frame: &mut Frame, creation: &Creation) {
@@ -65,12 +66,18 @@ pub fn render_creation(frame: &mut Frame, creation: &Creation) {
         )),
         Line::from(Span::raw("")),
     ];
-    lines.push(Line::from(Span::styled("  RACES", Style::default().fg(Color::Green))));
+    lines.push(Line::from(Span::styled(
+        "  RACES",
+        Style::default().fg(Color::Green),
+    )));
     for r in races {
         lines.push(Line::from(Span::raw(r)));
     }
     lines.push(Line::from(Span::raw("")));
-    lines.push(Line::from(Span::styled("  CLASSES", Style::default().fg(Color::Green))));
+    lines.push(Line::from(Span::styled(
+        "  CLASSES",
+        Style::default().fg(Color::Green),
+    )));
     for c in classes {
         lines.push(Line::from(Span::raw(c)));
     }
@@ -97,7 +104,9 @@ pub fn render_death(frame: &mut Frame, score: u64, depth: u8, level: u8) {
             Style::default().fg(Color::Red).bold(),
         )),
         Line::from(Span::raw("")),
-        Line::from(Span::raw(format!("  You died on depth {depth}, level {level}."))),
+        Line::from(Span::raw(format!(
+            "  You died on depth {depth}, level {level}."
+        ))),
         Line::from(Span::raw(format!("  Score: {score}"))),
         Line::from(Span::raw("")),
         Line::from(Span::raw("  [Enter] return to title")),
@@ -114,29 +123,24 @@ pub fn render_death(frame: &mut Frame, score: u64, depth: u8, level: u8) {
     );
 }
 
-pub fn render_victory(
-     frame: &mut Frame,
-     score: u64,
-     turns: u64,
-     can_endless: bool,
- ) {
-     let area = frame.area();
-     let prompt = if can_endless {
-         "  [C]ontinue in endless mode   [Enter] return to title"
-     } else {
-         "  [Enter] return to title"
-     };
-     let lines = vec![
-         Line::from(Span::styled(
-             "  VICTORY!",
-             Style::default().fg(Color::Yellow).bg(Color::Black).bold(),
-         )),
-         Line::from(Span::raw("  You raised the Amulet of the Abyss!")),
-         Line::from(Span::raw("")),
-         Line::from(Span::raw(format!("  Score: {score}   Turns: {turns}"))),
-         Line::from(Span::raw("")),
-         Line::from(Span::raw(prompt)),
-     ];
+pub fn render_victory(frame: &mut Frame, score: u64, turns: u64, can_endless: bool) {
+    let area = frame.area();
+    let prompt = if can_endless {
+        "  [C]ontinue in endless mode   [Enter] return to title"
+    } else {
+        "  [Enter] return to title"
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            "  VICTORY!",
+            Style::default().fg(Color::Yellow).bg(Color::Black).bold(),
+        )),
+        Line::from(Span::raw("  You raised the Amulet of the Abyss!")),
+        Line::from(Span::raw("")),
+        Line::from(Span::raw(format!("  Score: {score}   Turns: {turns}"))),
+        Line::from(Span::raw("")),
+        Line::from(Span::raw(prompt)),
+    ];
     let para = Paragraph::new(lines);
     frame.render_widget(
         para,
