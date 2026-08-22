@@ -1,0 +1,84 @@
+name: CI (v100)
+
+on:
+  push:
+    paths:
+      - 'v100/**'
+      - '.github/workflows/ci-v100.yml'
+  pull_request:
+    paths:
+      - 'v100/**'
+      - '.github/workflows/ci-v100.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: v100
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            v100/target
+          key: ${{ runner.os }}-cargo-v100-${{ hashFiles('v100/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-v100-
+      # The core is 100% UI-agnostic and headless-testable. Build and test
+      # without the audio feature so CI never needs an audio device.
+      - name: Build (no audio)
+        run: cargo build --no-default-features
+      - name: Test (no audio)
+        run: cargo test --no-default-features
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v100
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            v100/target
+          key: ${{ runner.os }}-cargo-v100-${{ hashFiles('v100/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-v100-
+      - name: Clippy (all targets, no audio)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v100
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check

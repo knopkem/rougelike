@@ -1,22 +1,31 @@
 # Local LLM Game Dev
 
-Note: This is an experience with local LLM (qwen3.8-27B) on minimal hardware: GPU with 16GB VRAM only.
+A record of experiments in building a roguelike **from scratch** with a local
+LLM. Each attempt pairs a hardware setup with a model quantization and context
+window. The goal: find a hardware–model combination that can actually build a
+playable roguelike.
 
-Baseline: IQ3-XXS model, q8_0 KV, 96K context
+The model for every attempt is **qwen3.8-27B**; what varies is the hardware,
+quantization, KV-cache format, and context window.
 
-System:
+## Attempts
 
-- Ryzen 5700 32GB RAM
-- AMD 6800 XT 16GB VRAM
-- Ubuntu
+| # | Location | GPU | CPU / RAM | OS | Quant | KV | Context |
+|---|----------|-----|-----------|----|-------|----|---------|
+| 1 — baseline | [`/`](./) | AMD 6800 XT 16GB | Ryzen 5700, 32GB | Ubuntu | IQ3-XXS | q8_0 | 96K |
+| 2 — V100 | [`v100/`](./v100) | NVIDIA V100 32GB | Intel i9-14900KF | Windows 11 | Q4_K_M | DFlash2 | 262K |
 
-Harness:
+Shared harness:
 
 - llama-cpp-turboquant
 - opencode
 - mattpocock/skills
 
-## The Game
+Each attempt lives in its own directory with its own `Cargo.toml`, `src/`, and
+`README.md`. The sections below describe the **baseline** attempt (the root
+game); see [`v100/README.md`](./v100/README.md) for the V100 attempt.
+
+## The Game (baseline)
 
 A terminal roguelike written in Rust. Descend 25 floors of a procedurally
 generated dungeon, fight monsters, collect loot, and raise the
@@ -24,12 +33,19 @@ generated dungeon, fight monsters, collect loot, and raise the
 
 ## Building & Running
 
+Each attempt is a standalone Cargo project.
+
 ```sh
+# baseline (root)
 cargo run
+
+# V100 attempt
+cd v100 && cargo run
 ```
 
-(Requires Rust toolchain. Dependencies: ratatui, crossterm, rand, serde,
-dirs.)
+(Requires a Rust toolchain. Dependencies: ratatui, crossterm, rand, serde,
+dirs. Audio is optional — build with `--no-default-features` for a headless
+build.)
 
 ## The Goal
 
@@ -111,5 +127,9 @@ src/
 ## Tests
 
 ```sh
+# baseline (root)
 cargo test
+
+# V100 attempt
+cd v100 && cargo test
 ```

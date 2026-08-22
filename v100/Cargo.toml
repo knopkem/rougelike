@@ -1,0 +1,29 @@
+[package]
+name = "deepdelve"
+version = "0.1.0"
+edition = "2024"
+description = "Deep Delve - a production-quality, console-only roguelike"
+license = "MIT"
+
+[features]
+default = ["audio"]
+audio = ["dep:rodio"]
+
+[dependencies]
+ratatui = "0.30.2"
+crossterm = "0.29.0"
+rand = { version = "0.10", features = ["serde"] }
+rand_chacha = { version = "0.10", features = ["serde"] }
+rand_core = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+thiserror = "2"
+rodio = { version = "0.22.2", default-features = false, features = ["playback"], optional = true }
+
+[dev-dependencies]
+proptest = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
